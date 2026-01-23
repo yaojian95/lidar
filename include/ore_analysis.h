@@ -1,0 +1,80 @@
+#pragma once
+
+#include <iostream>
+#include <pcl/PointIndices.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <string>
+#include <vector>
+
+struct Ore {
+  std::string id;
+  pcl::PointIndicesPtr point_indices;
+
+  // Stats
+  float avg_thickness = 0.0f;
+  float max_thickness = 0.0f;
+
+  // Physical bounding box (x, y)
+  float min_x, max_x, min_y, max_y;
+
+  // Thickness Map (2D Grid)
+  // Resolution is defined by the calculator
+  std::vector<std::vector<float>> thickness_map;
+  float map_resolution = 0.01f;
+  float map_min_x = 0.0f;
+  float map_min_y = 0.0f;
+};
+
+class OreAnalyzer {
+public:
+  using PointT = pcl::PointXYZ;
+  using PointCloud = pcl::PointCloud<PointT>;
+  using PointCloudPtr = PointCloud::Ptr;
+
+  OreAnalyzer();
+
+  void setPointCloud(PointCloudPtr cloud);
+  void setConfig(float unit_scale, float ground_threshold = 0.02f);
+
+  // Step 1: Align Z=0 to the ground plane
+  // Returns true if a plane was found
+  bool alignToGround();
+
+  // Use pre-computed plane coefficients (skip RANSAC)
+  bool alignToGroundWithPlane(float a, float b, float c, float d);
+
+  // Get the plane coefficients (after alignToGround)
+  void getPlaneCoefficients(float &a, float &b, float &c, float &d) const;
+
+  // Get the aligned cloud (for visualization)
+  PointCloudPtr getAlignedCloud() const { return aligned_cloud_; }
+
+  // Step 2: Detection Methods
+  std::vector<Ore> detectByLidar(float cluster_tolerance = 0.05f,
+                                 int min_size = 50, int max_size = 50000);
+  Ore detectByROI(float min_x, float max_x, float min_y, float max_y);
+  // Mask is a flat array (row-major), 1=ore, 0=background
+  // This function assumes the mask covers a specific physical area [mask_min_x,
+  // mask_max_x] x [mask_min_y, mask_max_y]
+  Ore detectByMask(const std::vector<uint8_t> &mask, int width, int height,
+                   float mask_min_x, float mask_max_x, float mask_min_y,
+                   float mask_max_y);
+
+  // Step 3: Calculation
+  // If generate_map is true, it builds the 2D thickness grid using
+  // interpolation
+  void computeStats(Ore &ore, bool generate_map = false, float map_res = 0.01f);
+
+private:
+  PointCloudPtr original_cloud_;
+  PointCloudPtr aligned_cloud_;
+  float unit_scale_ = 1.0f;
+  float ground_threshold_ = 0.02f;
+
+  // Cached plane coefficients
+  float plane_a_ = 0.0f;
+  float plane_b_ = 0.0f;
+  float plane_c_ = 1.0f;
+  float plane_d_ = 0.0f;
+};

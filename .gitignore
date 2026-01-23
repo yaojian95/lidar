@@ -1,0 +1,86 @@
+############################
+# Build directories
+############################
+build/
+build-*/
+cmake-build-*/
+out/
+bin/
+lib/
+
+############################
+# CMake
+############################
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+# compile_commands.json
+
+############################
+# Compiled objects
+############################
+*.o
+*.obj
+*.lo
+*.a
+*.lib
+*.so
+*.so.*
+*.dll
+*.dylib
+
+############################
+# Executables
+############################
+*.exe
+*.out
+*.app
+
+############################
+# IDE / Editor
+############################
+.vscode/
+.idea/
+*.swp
+*.swo
+*.user
+*.user.*
+*.vcxproj*
+*.sln
+
+############################
+# Visual Studio
+############################
+.vs/
+Debug/
+Release/
+x64/
+x86/
+
+############################
+# Logs / temp
+############################
+*.log
+*.tmp
+*.cache
+
+############################
+# OS
+############################
+.DS_Store
+Thumbs.db
+
+############################
+# Python (如果你有脚本)
+############################
+__pycache__/
+*.pyc
+
+############################
+# Optional: datasets / large files
+############################
+data/
+*.pcd
+*.ply
+*.bin

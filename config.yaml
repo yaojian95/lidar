@@ -1,0 +1,14 @@
+pcd_path: "E:/multi_source_info/lidar/pcd_data/SaveData_4.ply"
+# pcd_path: "E:/multi_source_info/lidar/pcd_data/combined_cloud_0121.ply"
+unit_scale: 1.0 # 1.0 if file is meters, 0.001 if mm
+
+# Plane detection options
+save_plane_equation: true  # If true, save detected plane to this file
+visual_plane: true          # If true, visualize the ground plane in viewer
+
+# Plane equation (auto-filled if save_plane_equation=true, or manually set)
+# Format: ax + by + cz + d = 0
+plane_a: -0.000024
+plane_b: -0.009852
+plane_c: 0.999951
+plane_d: -927.200378
