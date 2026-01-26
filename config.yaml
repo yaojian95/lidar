@@ -1,14 +1,20 @@
-pcd_path: "E:/multi_source_info/lidar/pcd_data/SaveData_4.ply"
-# pcd_path: "E:/multi_source_info/lidar/pcd_data/combined_cloud_0121.ply"
+# pcd_path: "E:/multi_source_info/lidar/pcd_data/SaveData_4.ply"
+pcd_path: "E:/multi_source_info/lidar/pcd_data/combined_cloud_0121.ply"
 unit_scale: 1.0 # 1.0 if file is meters, 0.001 if mm
 
 # Plane detection options
-save_plane_equation: true  # If true, save detected plane to this file
-visual_plane: true          # If true, visualize the ground plane in viewer
+save_plane_equation: false  # If true, save detected plane to this file
+visual_plane: false          # If true, visualize the ground plane in viewer
 
 # Plane equation (auto-filled if save_plane_equation=true, or manually set)
 # Format: ax + by + cz + d = 0
-plane_a: -0.000024
-plane_b: -0.009852
-plane_c: 0.999951
-plane_d: -927.200378
+plane_a: 0.000003
+plane_b: -0.008955
+plane_c: 0.999960
+plane_d: -2.044467
+ground_threshold: 0.020702
+belt_min_y: -457.155731
+belt_max_y: 459.293762
+fit_belt_edges: False # If true, detect and calibrate side panels. If false, use belt_min_y/max_y directly.
+ground_filter_sigma: 6.0 # Multiplier for StdDev in ground threshold calculation
+ground_filter_margin: 1.0 # Fixed margin (in point cloud units) added to ground threshold

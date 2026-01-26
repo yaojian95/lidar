@@ -2,6 +2,8 @@
 #include "utils.h"
 #include <iostream>
 #include <pcl/common/centroid.h>
+#include <pcl/common/common.h>
+#include <pcl/common/transforms.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/io/ply_io.h>
 #include <pcl/point_types.h>
@@ -20,6 +22,8 @@ int main() {
   float unit_scale = Config::get<float>(config, "unit_scale", 1.0f);
   bool save_plane = Config::get<bool>(config, "save_plane_equation", false);
   bool visual_plane = Config::get<bool>(config, "visual_plane", true);
+  float ground_threshold =
+      Config::get<float>(config, "ground_threshold", 0.02f);
 
   if (pcd_path.empty()) {
     PCL_ERROR("Could not find pcd_path in config.yaml\n");
@@ -51,9 +55,15 @@ int main() {
   std::cout << "Points: " << cloud->size() << std::endl;
 
   // Ore Analysis
+  float ground_filter_sigma =
+      Config::get<float>(config, "ground_filter_sigma", 6.0f);
+  float ground_filter_margin =
+      Config::get<float>(config, "ground_filter_margin", 1.0f);
+
   OreAnalyzer analyzer;
   analyzer.setPointCloud(cloud);
-  analyzer.setConfig(unit_scale);
+  analyzer.setConfig(unit_scale, ground_threshold);
+  analyzer.setGroundThresholdParams(ground_filter_sigma, ground_filter_margin);
 
   std::cout << "Aligning to ground..." << std::endl;
 
@@ -75,12 +85,78 @@ int main() {
 
       PlaneCoefficients plane{a, b, c, d, true};
       plane.saveToConfig(config);
+
+      // Also save the calculated ground threshold
+      config["ground_threshold"] = analyzer.getGroundThreshold();
+
       saveConfigWithComments("E:/multi_source_info/lidar/config.yaml", config);
     }
   }
 
   if (aligned) {
     std::cout << "Ground aligned successfully." << std::endl;
+    // Refresh threshold (critical if updated by analyzer)
+    ground_threshold = analyzer.getGroundThreshold();
+    std::cout << "Using ground_threshold for filtering: " << ground_threshold
+              << std::endl;
+
+    // Side Panel Calibration and Filtering
+    // Known height = 17 cm = 0.17 m
+    float known_panel_height = 0.17f;
+    float new_scale = 1.0f;
+
+    // Check config for behavior
+    bool fit_belt_edges = Config::get<bool>(config, "fit_belt_edges", false);
+    float belt_min_y = Config::get<float>(config, "belt_min_y", -1e9f);
+    float belt_max_y = Config::get<float>(config, "belt_max_y", 1e9f);
+
+    if (fit_belt_edges) {
+      std::cout << "Detecting side panels for calibration (Known Height: "
+                << known_panel_height << "m)..." << std::endl;
+      if (analyzer.calibrateAndFilterSidePanels(known_panel_height,
+                                                new_scale)) {
+        std::cout << "Calibration Successful. New Unit Scale: " << new_scale
+                  << std::endl;
+
+        // Update Config
+        if (std::abs(new_scale - unit_scale) > 0.0001f) {
+          std::cout << "Updating config with new unit_scale." << std::endl;
+          config["unit_scale"] = new_scale;
+          // Also need to set it in analyzer for subsequent conversions
+          analyzer.setConfig(new_scale, ground_threshold);
+          unit_scale = new_scale;
+        }
+
+        // Save Belt Boundaries
+        config["belt_min_y"] = analyzer.getBeltMinY();
+        config["belt_max_y"] = analyzer.getBeltMaxY();
+        std::cout << "Saving Belt Boundaries to config: "
+                  << analyzer.getBeltMinY() << " to " << analyzer.getBeltMaxY()
+                  << std::endl;
+
+        // Save to file
+        if (save_plane) { // Or generally save it? User said "save it".
+          saveConfigWithComments("E:/multi_source_info/lidar/config.yaml",
+                                 config);
+        } else {
+          // Even if save_plane is false, user might want to save calibration.
+          // Force save for calibration? Let's assume yes as per request.
+          saveConfigWithComments("E:/multi_source_info/lidar/config.yaml",
+                                 config);
+        }
+      } else {
+        std::cout
+            << "Side panel calibration failed or panels not found. Keeping "
+               "original scale."
+            << std::endl;
+      }
+    } else {
+      std::cout << "Skipping calibration. Filtering using configured belt "
+                   "boundaries: "
+                << belt_min_y << " to " << belt_max_y << std::endl;
+      analyzer.setBeltBoundaries(belt_min_y, belt_max_y);
+      analyzer.filterSidePanels();
+    }
 
     // Auto-detection (LiDAR Clustering)
     std::cout << "Detecting ores..." << std::endl;
@@ -99,6 +175,37 @@ int main() {
     std::cout << "Failed to align ground, showing original cloud." << std::endl;
   }
 
+  // Filter out ground points for visualization if aligned
+  if (aligned) {
+    pcl::PointCloud<pcl::PointXYZ>::Ptr non_ground(
+        new pcl::PointCloud<pcl::PointXYZ>);
+    for (const auto &pt : *cloud) {
+      if (pt.z > ground_threshold) {
+        non_ground->push_back(pt);
+      }
+    }
+    std::cout << "Visualization: Filtering ground points. Original: "
+              << cloud->size() << ", Non-ground: " << non_ground->size()
+              << std::endl;
+
+    // Update cloud to point to non_ground for visualization
+    cloud = non_ground;
+  }
+
+  // Center cloud for visualization
+  Eigen::Vector4f centroid;
+  pcl::compute3DCentroid(*cloud, centroid);
+  std::cout << "Point Cloud Quantized Centroid: " << centroid[0] << ", "
+            << centroid[1] << ", " << centroid[2] << std::endl;
+
+  // Shift to center (X, Y) but keep Z (ground plane at 0)
+  Eigen::Matrix4f transform_centering = Eigen::Matrix4f::Identity();
+  transform_centering(0, 3) = -centroid[0];
+  transform_centering(1, 3) = -centroid[1];
+  // Z remains 0
+
+  pcl::transformPointCloud(*cloud, *cloud, transform_centering);
+
   // Visualization
   pcl::visualization::PCLVisualizer::Ptr viewer(
       new pcl::visualization::PCLVisualizer("PCD Viewer"));
@@ -115,16 +222,51 @@ int main() {
 
   // Visualize ground plane if requested
   if (visual_plane && aligned) {
-    pcl::ModelCoefficients plane_coeff;
-    plane_coeff.values.resize(4);
-    plane_coeff.values[0] = 0.0;
-    plane_coeff.values[1] = 0.0;
-    plane_coeff.values[2] = 1.0;
-    plane_coeff.values[3] = 0.0;
+    // Calcluate bounds for ground plane and grid
+    pcl::PointXYZ min_pt, max_pt;
+    pcl::getMinMax3D(*cloud, min_pt, max_pt);
 
-    viewer->addPlane(plane_coeff, "ground_plane");
-    std::cout << "Ground plane visualized (green transparent plane at Z=0)."
-              << std::endl;
+    // Add some margin
+    double margin = 5.0;
+    double min_x = min_pt.x - margin;
+    double max_x = max_pt.x + margin;
+    double min_y = min_pt.y - margin;
+    double max_y = max_pt.y + margin;
+
+    // Draw Ground as a thin cube (visualized as plane)
+    viewer->addCube(min_x, max_x, min_y, max_y, -0.1, 0.0, 1.0, 1.0, 1.0,
+                    "ground_plane");
+    viewer->setShapeRenderingProperties(
+        pcl::visualization::PCL_VISUALIZER_OPACITY, 0.3, "ground_plane");
+    viewer->setShapeRenderingProperties(
+        pcl::visualization::PCL_VISUALIZER_COLOR, 1.0, 1.0, 1.0,
+        "ground_plane"); // White
+
+    // // Draw Grid (Scales)
+    // double step = 10.0; // Grid every 10 units
+    // int grid_id = 0;
+
+    // // X-lines (varying Y)
+    // double start_x = std::floor(min_x / step) * step;
+    // for (double x = start_x; x <= max_x; x += step) {
+    //   pcl::PointXYZ p1(x, min_y, 0.0);
+    //   pcl::PointXYZ p2(x, max_y, 0.0);
+    //   std::string id = "grid_x_" + std::to_string(grid_id++);
+    //   viewer->addLine(p1, p2, 0.5, 0.5, 0.5, id);
+    // }
+
+    // // Y-lines (varying X)
+    // double start_y = std::floor(min_y / step) * step;
+    // for (double y = start_y; y <= max_y; y += step) {
+    //   pcl::PointXYZ p1(min_x, y, 0.0);
+    //   pcl::PointXYZ p2(max_x, y, 0.0);
+    //   std::string id = "grid_y_" + std::to_string(grid_id++);
+    //   viewer->addLine(p1, p2, 0.5, 0.5, 0.5, id);
+    // }
+
+    // std::cout << "Ground plane visualized (white transparent) with grid scale
+    // ("
+    //           << step << " units)." << std::endl;
   }
 
   viewer->resetCamera();

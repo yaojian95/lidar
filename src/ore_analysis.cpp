@@ -83,6 +83,33 @@ bool OreAnalyzer::alignToGround() {
 
   std::cout << "Aligned ground to Z=0. Translation Z: " << -average_z
             << std::endl;
+
+  // Check orientation: Are most points above or below Z=0?
+  // We expect ores to be "above" ground (Z > 0).
+  // If the centroid of the cloud (relative to ground) is negative, we might
+  // need to flip. Actually, let's just use a simple heuristic: if average Z of
+  // all points is negative, flip. Since ground is at 0, if there are objects,
+  // they pull the average up or down. Exception: if there is noise below
+  // ground. Better: Check 90th percentile vs 10th percentile distance from 0?
+  // Let's rely on the user's observation: "Z axis direction is opposite".
+  // Let's check the average Z of the aligned cloud.
+  double sum_z_aligned = 0;
+  for (const auto &p : *aligned_cloud_)
+    sum_z_aligned += p.z;
+  if (sum_z_aligned < 0) {
+    std::cout
+        << "Detected inverted Z-axis (objects below ground). Flipping Z..."
+        << std::endl;
+    Eigen::Matrix4f flip = Eigen::Matrix4f::Identity();
+    flip(2, 2) = -1.0f; // Flip Z
+    pcl::transformPointCloud(*aligned_cloud_, *aligned_cloud_, flip);
+  }
+
+  // Calculate actual ground thickness (Robustly)
+  recalculateGroundThreshold();
+
+  return true;
+
   return true;
 }
 
@@ -121,6 +148,22 @@ bool OreAnalyzer::alignToGroundWithPlane(float a, float b, float c, float d) {
 
   std::cout << "Aligned ground using cached plane. Translation Z: "
             << -average_z << std::endl;
+
+  // Check orientation (same heuristic)
+  double sum_z_aligned = 0;
+  for (const auto &p : *aligned_cloud_)
+    sum_z_aligned += p.z;
+  if (sum_z_aligned < 0) {
+    std::cout
+        << "Detected inverted Z-axis (objects below ground). Flipping Z..."
+        << std::endl;
+    Eigen::Matrix4f flip = Eigen::Matrix4f::Identity();
+    flip(2, 2) = -1.0f; // Flip Z
+    pcl::transformPointCloud(*aligned_cloud_, *aligned_cloud_, flip);
+  }
+  // Also recalculate threshold for cached plane
+  recalculateGroundThreshold();
+
   return true;
 }
 
@@ -140,7 +183,14 @@ std::vector<Ore> OreAnalyzer::detectByLidar(float cluster_tolerance,
   pcl::PointIndices::Ptr non_ground_indices(new pcl::PointIndices);
   for (size_t i = 0; i < aligned_cloud_->size(); ++i) {
     if (aligned_cloud_->points[i].z >
-        ground_threshold_ * 2.0f) { // Only take points clearly above ground
+        ground_threshold_) { // Only take points clearly above ground
+
+      // Apply Belt Boundary Filter if set
+      if (aligned_cloud_->points[i].y < belt_min_y_ ||
+          aligned_cloud_->points[i].y > belt_max_y_) {
+        continue;
+      }
+
       non_ground_indices->indices.push_back(i);
     }
   }
@@ -348,4 +398,307 @@ void OreAnalyzer::computeStats(Ore &ore, bool generate_map, float map_res) {
     }
     ore.thickness_map = new_map;
   }
+}
+
+void OreAnalyzer::recalculateGroundThreshold() {
+  if (aligned_cloud_->empty())
+    return;
+
+  // Use statistical analysis for points near Z=0
+  // 1. First pass: Collect points within a reasonable initial range (e.g. +/-
+  // 0.5m)
+  //    Why 0.5? Ground is at 0. Noise shouldn't exceed 50cm usually.
+  std::vector<float> z_values;
+  z_values.reserve(aligned_cloud_->size() / 10); // reserve some space
+
+  for (const auto &pt : *aligned_cloud_) {
+    if (std::abs(pt.z) < 0.5f) {
+      z_values.push_back(pt.z);
+    }
+  }
+
+  if (z_values.empty()) {
+    std::cout << "Warning: No points near Z=0. Ground alignment might be wrong."
+              << std::endl;
+    return;
+  }
+
+  // 2. Compute Mean and StdDev
+  double sum = std::accumulate(z_values.begin(), z_values.end(), 0.0);
+  double mean = sum / z_values.size();
+
+  double sq_sum = 0.0;
+  for (float z : z_values) {
+    sq_sum += (z - mean) * (z - mean);
+  }
+  double std_dev = std::sqrt(sq_sum / z_values.size());
+
+  // 3. Set threshold
+  // We want to cut off the ground noise.
+  // 3-sigma rule covers 99.7% of normal distribution.
+  // Updated: User reports belt points still visible. Increasing to configurable
+  // sigma + margin.
+  float new_threshold =
+      static_cast<float>(mean + ground_sigma_ * std_dev + ground_margin_);
+
+  // Sanity check: don't let it be too small (noise always exists)
+  if (new_threshold < 0.02f)
+    new_threshold = 0.02f;
+
+  std::cout << "Recalculated Ground Threshold Statistics (N=" << z_values.size()
+            << "):" << std::endl;
+  std::cout << "  Mean Z: " << mean << std::endl;
+  std::cout << "  StdDev: " << std_dev << std::endl;
+  std::cout << "  Updating ground_threshold_ to: " << new_threshold << " (from "
+            << ground_threshold_ << ")" << std::endl;
+
+  ground_threshold_ = new_threshold;
+}
+
+bool OreAnalyzer::calibrateAndFilterSidePanels(float known_height_m,
+                                               float &calculated_scale) {
+  if (aligned_cloud_->empty())
+    return false;
+
+  // 1. Identify Left and Right Regions
+  // Assuming Y-axis is the cross-belt direction (or we find Principal
+  // Component) Let's use PCA to find the primary axes. Or simpler: Iterate to
+  // correct min/max Y.
+  pcl::PointXYZ min_pt, max_pt;
+  pcl::getMinMax3D(*aligned_cloud_, min_pt, max_pt);
+
+  float mid_y = (min_pt.y + max_pt.y) / 2.0f;
+  float y_range = max_pt.y - min_pt.y;
+
+  // Definition of Side Regions: Outer 20% on each side?
+  float left_boundary = max_pt.y - (y_range * 0.25f);
+  float right_boundary = min_pt.y + (y_range * 0.25f);
+
+  // Collect candidate points (must be somewhat above ground)
+  pcl::PointIndices::Ptr candidates_left(new pcl::PointIndices);
+  pcl::PointIndices::Ptr candidates_right(new pcl::PointIndices);
+
+  // Also keep candidates for filtering later
+  std::vector<int> all_side_indices;
+
+  for (size_t i = 0; i < aligned_cloud_->size(); ++i) {
+    const auto &pt = aligned_cloud_->points[i];
+    if (pt.z > ground_threshold_) { // Above ground
+      if (pt.y > left_boundary) {
+        candidates_left->indices.push_back(i);
+      } else if (pt.y < right_boundary) {
+        candidates_right->indices.push_back(i);
+      }
+    }
+  }
+
+  if (candidates_left->indices.size() < 100 &&
+      candidates_right->indices.size() < 100) {
+    std::cout << "Not enough points on sides to detect panels." << std::endl;
+    return false;
+  }
+
+  // 2. Detect Planes
+  pcl::SACSegmentation<PointT> seg;
+  seg.setOptimizeCoefficients(true);
+  seg.setModelType(pcl::SACMODEL_PLANE);
+  seg.setMethodType(pcl::SAC_RANSAC);
+  seg.setDistanceThreshold(0.05); // Tolerance for panel flatness
+  seg.setInputCloud(aligned_cloud_);
+
+  float left_height = 0.0f;
+  float right_height = 0.0f;
+  bool found_left = false;
+  bool found_right = false;
+
+  // Detect Left
+  if (candidates_left->indices.size() > 100) {
+    pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
+    pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
+    seg.setIndices(candidates_left);
+    seg.segment(*inliers, *coefficients);
+    if (!inliers->indices.empty()) {
+      // Compute height (Z span)
+      float min_z = 1e9, max_z = -1e9;
+      for (int idx : inliers->indices) {
+        float z = aligned_cloud_->points[idx].z;
+        if (z < min_z)
+          min_z = z;
+        if (z > max_z)
+          max_z = z;
+        all_side_indices.push_back(idx);
+      }
+      // Panels usually start at ground. So height is roughly max_z (relative to
+      // ground 0) But let's check if min_z is close to ground.
+      left_height = max_z; // Assuming Z=0 is bottom
+      found_left = true;
+      std::cout << "Found Left Panel. Height (Z): " << left_height
+                << " (Z range: " << min_z << " to " << max_z << ")"
+                << std::endl;
+    }
+  }
+
+  // Detect Right
+  if (candidates_right->indices.size() > 100) {
+    pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
+    pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
+    seg.setIndices(candidates_right);
+    seg.segment(*inliers, *coefficients);
+    if (!inliers->indices.empty()) {
+      // Compute height
+      float min_z = 1e9, max_z = -1e9;
+      for (int idx : inliers->indices) {
+        float z = aligned_cloud_->points[idx].z;
+        if (z < min_z)
+          min_z = z;
+        if (z > max_z)
+          max_z = z;
+        all_side_indices.push_back(idx);
+      }
+      right_height = max_z;
+      found_right = true;
+      std::cout << "Found Right Panel. Height (Z): " << right_height
+                << " (Z range: " << min_z << " to " << max_z << ")"
+                << std::endl;
+    }
+  }
+
+  if (!found_left && !found_right)
+    return false;
+
+  // 3. Calculate Scale
+  float avg_detected_height = 0.0f;
+  if (found_left && found_right)
+    avg_detected_height = (left_height + right_height) / 2.0f;
+  else if (found_left)
+    avg_detected_height = left_height;
+  else
+    avg_detected_height = right_height;
+
+  // Avoid division by zero
+  if (avg_detected_height < 0.001f)
+    return false;
+
+  calculated_scale = known_height_m / avg_detected_height;
+
+  std::cout << "Average Panel Height (Point Cloud Units): "
+            << avg_detected_height << std::endl;
+  std::cout << "Known Height: " << known_height_m << " m" << std::endl;
+  std::cout << "Calculated Unit Scale: " << calculated_scale << std::endl;
+
+  // 4. Filter them out (Update: Use geometric boundaries projected to ground
+  // for robustness) Why projection? Because if the wall is inclined and we only
+  // detecting the top part (Z >> 0), the simple min/max Y of inliers will be
+  // "too outer" and won't filter the bottom noise at Z=0. We must find the Y at
+  // Z=ground_threshold (inner edge).
+
+  Eigen::Vector4f centroid_L, centroid_R;
+
+  if (found_left) {
+    pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
+    pcl::ModelCoefficients::Ptr c(new pcl::ModelCoefficients);
+    seg.setIndices(candidates_left);
+    seg.segment(*inliers, *c);
+
+    // Solve for Y at Z=ground_threshold_.
+    // by = -(ax + cz + d) => y = -(ax + cz + d)/b
+    // We need an X. This is tricky if plane is skewed.
+    // But for side walls parallel to belt (X-axis), Y is roughly constant.
+    // Let's use the average X of the inliers.
+    pcl::compute3DCentroid(*aligned_cloud_, *inliers, centroid_L);
+    float avg_x = centroid_L[0];
+
+    // Projected Y
+    float proj_y = -(c->values[0] * avg_x + c->values[2] * ground_threshold_ +
+                     c->values[3]) /
+                   c->values[1];
+
+    // Left Panel (High Y side). Inner Edge is Min Y.
+    // Panel leans out ( \ ). Z=ground is bottom. Y at bottom is smaller
+    // (inner).
+    belt_max_y_ = proj_y;
+    std::cout << "Left Panel proj Y at ground: " << proj_y
+              << " (Avg X: " << avg_x << ")" << std::endl;
+  }
+
+  if (found_right) {
+    pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
+    pcl::ModelCoefficients::Ptr c(new pcl::ModelCoefficients);
+    seg.setIndices(candidates_right);
+    seg.segment(*inliers, *c);
+
+    pcl::compute3DCentroid(*aligned_cloud_, *inliers, centroid_R);
+    float avg_x = centroid_R[0];
+
+    // Projected Y
+    float proj_y = -(c->values[0] * avg_x + c->values[2] * ground_threshold_ +
+                     c->values[3]) /
+                   c->values[1];
+
+    // Right Panel (Low Y). Inner Edge is Max Y.
+    // Panel leans out ( / ). Z=ground is bottom. Y at bottom is larger (inner).
+    belt_min_y_ = proj_y;
+    std::cout << "Right Panel proj Y at ground: " << proj_y
+              << " (Avg X: " << avg_x << ")" << std::endl;
+  }
+
+  // Fallback if projection failed or unreasonable?
+  pcl::PointXYZ min_pt_c, max_pt_c;
+  pcl::getMinMax3D(*aligned_cloud_, min_pt_c, max_pt_c);
+  if (belt_max_y_ > max_pt_c.y)
+    belt_max_y_ = max_pt_c.y;
+  if (belt_min_y_ < min_pt_c.y)
+    belt_min_y_ = min_pt_c.y;
+
+  std::cout << "Determined Belt Boundaries (Y): " << belt_min_y_ << " to "
+            << belt_max_y_ << std::endl;
+
+  // Remove points outside boundaries immediately?
+  // "Filter using lateral coordinates" - handled in detectByLidar or here
+  // Let's do it here physically to clean the cloud for visualization
+  pcl::ExtractIndices<PointT> extract_box;
+  extract_box.setInputCloud(aligned_cloud_);
+  pcl::PointIndices::Ptr indices_outside(new pcl::PointIndices);
+
+  for (size_t i = 0; i < aligned_cloud_->size(); ++i) {
+    float y = aligned_cloud_->points[i].y;
+    if (y < belt_min_y_ || y > belt_max_y_) { // Outside belt
+      indices_outside->indices.push_back(i);
+    }
+  }
+
+  extract_box.setIndices(indices_outside);
+  extract_box.setNegative(true);
+  extract_box.filter(*aligned_cloud_);
+
+  std::cout << "Removed " << indices_outside->indices.size()
+            << " points outside belt boundaries." << std::endl;
+
+  return true;
+}
+
+void OreAnalyzer::filterSidePanels() {
+  if (aligned_cloud_->empty())
+    return;
+
+  std::cout << "Filtering side panels using Boundaries: " << belt_min_y_
+            << " to " << belt_max_y_ << std::endl;
+
+  pcl::ExtractIndices<PointT> extract_box;
+  extract_box.setInputCloud(aligned_cloud_);
+  pcl::PointIndices::Ptr indices_outside(new pcl::PointIndices);
+
+  for (size_t i = 0; i < aligned_cloud_->size(); ++i) {
+    float y = aligned_cloud_->points[i].y;
+    if (y < belt_min_y_ || y > belt_max_y_) { // Outside belt
+      indices_outside->indices.push_back(i);
+    }
+  }
+
+  extract_box.setIndices(indices_outside);
+  extract_box.setNegative(true);
+  extract_box.filter(*aligned_cloud_);
+
+  std::cout << "Removed " << indices_outside->indices.size()
+            << " points outside belt boundaries (Manual Filter)." << std::endl;
 }

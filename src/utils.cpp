@@ -67,7 +67,13 @@ void saveConfigWithComments(const std::string &config_file,
     if (line.find("plane_a:") != std::string::npos ||
         line.find("plane_b:") != std::string::npos ||
         line.find("plane_c:") != std::string::npos ||
-        line.find("plane_d:") != std::string::npos) {
+        line.find("plane_d:") != std::string::npos ||
+        line.find("plane_d:") != std::string::npos ||
+        line.find("ground_threshold:") != std::string::npos ||
+        line.find("belt_min_y:") != std::string::npos ||
+        line.find("belt_max_y:") != std::string::npos ||
+        line.find("ground_filter_sigma:") != std::string::npos ||
+        line.find("ground_filter_margin:") != std::string::npos) {
 
       // Extract the key name
       std::string key;
@@ -79,6 +85,16 @@ void saveConfigWithComments(const std::string &config_file,
         key = "plane_c";
       else if (line.find("plane_d:") != std::string::npos)
         key = "plane_d";
+      else if (line.find("ground_threshold:") != std::string::npos)
+        key = "ground_threshold";
+      else if (line.find("belt_min_y:") != std::string::npos)
+        key = "belt_min_y";
+      else if (line.find("belt_max_y:") != std::string::npos)
+        key = "belt_max_y";
+      else if (line.find("ground_filter_sigma:") != std::string::npos)
+        key = "ground_filter_sigma";
+      else if (line.find("ground_filter_margin:") != std::string::npos)
+        key = "ground_filter_margin";
 
       // Get leading whitespace
       size_t first_non_space = line.find_first_not_of(" \t");
@@ -109,6 +125,18 @@ void saveConfigWithComments(const std::string &config_file,
       has_plane_d = true;
   }
 
+  bool has_threshold = false;
+  bool has_belt_min = false;
+  bool has_belt_max = false;
+  for (const auto &l : lines) {
+    if (l.find("ground_threshold:") != std::string::npos)
+      has_threshold = true;
+    if (l.find("belt_min_y:") != std::string::npos)
+      has_belt_min = true;
+    if (l.find("belt_max_y:") != std::string::npos)
+      has_belt_max = true;
+  }
+
   if (!has_plane_a || !has_plane_b || !has_plane_c || !has_plane_d) {
     lines.push_back("");
     lines.push_back("# Plane equation (auto-generated)");
@@ -124,7 +152,40 @@ void saveConfigWithComments(const std::string &config_file,
     if (!has_plane_d && config["plane_d"])
       lines.push_back("plane_d: " +
                       std::to_string(config["plane_d"].as<float>()));
+    if (!has_plane_d && config["plane_d"])
+      lines.push_back("plane_d: " +
+                      std::to_string(config["plane_d"].as<float>()));
   }
+
+  if (!has_threshold && config["ground_threshold"]) {
+    lines.push_back("ground_threshold: " +
+                    std::to_string(config["ground_threshold"].as<float>()));
+  }
+  if (!has_belt_min && config["belt_min_y"]) {
+    lines.push_back("belt_min_y: " +
+                    std::to_string(config["belt_min_y"].as<float>()));
+  }
+  if (!has_belt_max && config["belt_max_y"]) {
+    lines.push_back("belt_max_y: " +
+                    std::to_string(config["belt_max_y"].as<float>()));
+  }
+
+  // Add new keys if missing
+  bool has_sigma = false;
+  bool has_margin = false;
+  for (const auto &l : lines) {
+    if (l.find("ground_filter_sigma:") != std::string::npos)
+      has_sigma = true;
+    if (l.find("ground_filter_margin:") != std::string::npos)
+      has_margin = true;
+  }
+
+  if (!has_sigma && config["ground_filter_sigma"])
+    lines.push_back("ground_filter_sigma: " +
+                    std::to_string(config["ground_filter_sigma"].as<float>()));
+  if (!has_margin && config["ground_filter_margin"])
+    lines.push_back("ground_filter_margin: " +
+                    std::to_string(config["ground_filter_margin"].as<float>()));
 
   // Write back to file
   std::ofstream outfile(config_file);

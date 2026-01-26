@@ -72,9 +72,43 @@ private:
   float unit_scale_ = 1.0f;
   float ground_threshold_ = 0.02f;
 
+public:
+  float getGroundThreshold() const { return ground_threshold_; }
+
   // Cached plane coefficients
   float plane_a_ = 0.0f;
   float plane_b_ = 0.0f;
   float plane_c_ = 1.0f;
   float plane_d_ = 0.0f;
+
+  // Helper to robustly determine threshold from aligned cloud
+  void recalculateGroundThreshold();
+
+  // Detect side panels (belt guards), calibrate unit scale, and filter them out
+  // Returns true if side panels were successfully detected
+  bool calibrateAndFilterSidePanels(float known_height_m,
+                                    float &calculated_scale);
+
+  float getBeltMinY() const { return belt_min_y_; }
+  float getBeltMaxY() const { return belt_max_y_; }
+  void setBeltBoundaries(float min_y, float max_y) {
+    belt_min_y_ = min_y;
+    belt_max_y_ = max_y;
+  }
+  void setGroundThresholdParams(float sigma, float margin) {
+    ground_sigma_ = sigma;
+    ground_margin_ = margin;
+  }
+
+  // Explicitly Apply Filtering using current belt boundaries
+  void filterSidePanels();
+
+private:
+  // Belt Boundaries (Y-axis)
+  float belt_min_y_ = -1e9f;
+  float belt_max_y_ = 1e9f;
+
+  // Ground Threshold Params
+  float ground_sigma_ = 3.0f;
+  float ground_margin_ = 0.005f;
 };
