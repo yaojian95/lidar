@@ -179,52 +179,21 @@ std::vector<Ore> OreAnalyzer::detectByLidar(float cluster_tolerance,
                                             int min_size, int max_size) {
   std::vector<Ore> ores;
 
-  // 1. Filter out ground points (Z <= approx 0 + buffer)
-  pcl::PointIndices::Ptr non_ground_indices(new pcl::PointIndices);
-  for (size_t i = 0; i < aligned_cloud_->size(); ++i) {
-    if (aligned_cloud_->points[i].z >
-        ground_threshold_) { // Only take points clearly above ground
-
-      // Apply Belt Boundary Filter if set
-      if (aligned_cloud_->points[i].y < belt_min_y_ ||
-          aligned_cloud_->points[i].y > belt_max_y_) {
-        continue;
-      }
-
-      non_ground_indices->indices.push_back(i);
-    }
-  }
-
-  if (non_ground_indices->indices.empty())
+  if (aligned_cloud_->empty())
     return ores;
 
-  // 2. Euclidean Clustering
+  // 2. Euclidean Clustering directly on aligned_cloud_
+  // Assumes filterGroundPoints() and filterSidePanels() have been called
   pcl::search::KdTree<PointT>::Ptr tree(new pcl::search::KdTree<PointT>);
-  tree->setInputCloud(
-      aligned_cloud_); // Use the full cloud, but we will extract only
-                       // non-ground for clustering?
-  // Actually, extract_clusters wants indices or a filtered cloud. Let's create
-  // a sub-cloud for simplicity. Ideally we use setIndices, but let's stick to
-  // extraction to avoid index mapping confusion initially.
-  PointCloudPtr object_cloud(new PointCloud);
-  pcl::ExtractIndices<PointT> extract;
-  extract.setInputCloud(aligned_cloud_);
-  extract.setIndices(non_ground_indices);
-  extract.setNegative(false);
-  extract.filter(*object_cloud);
+  tree->setInputCloud(aligned_cloud_);
 
-  // We need to map back indices from object_cloud to aligned_cloud_
-  // This is tricky if we just copy. Let's keep a map.
-  std::vector<int> object_to_original_map = non_ground_indices->indices;
-
-  tree->setInputCloud(object_cloud);
   std::vector<pcl::PointIndices> cluster_indices;
   pcl::EuclideanClusterExtraction<PointT> ec;
   ec.setClusterTolerance(cluster_tolerance);
   ec.setMinClusterSize(min_size);
   ec.setMaxClusterSize(max_size);
   ec.setSearchMethod(tree);
-  ec.setInputCloud(object_cloud);
+  ec.setInputCloud(aligned_cloud_);
   ec.extract(cluster_indices);
 
   int ore_id = 0;
@@ -232,12 +201,8 @@ std::vector<Ore> OreAnalyzer::detectByLidar(float cluster_tolerance,
     Ore ore;
     ore.id = "ore_" + std::to_string(ore_id++);
     ore.point_indices.reset(new pcl::PointIndices);
-
-    for (const auto &idx : it.indices) {
-      // idx is index in object_cloud
-      // map back to original aligned_cloud_
-      ore.point_indices->indices.push_back(object_to_original_map[idx]);
-    }
+    // Indices now map 1:1 since we are clustering the aligned_cloud_ directly
+    ore.point_indices->indices = it.indices;
     ores.push_back(ore);
   }
   return ores;
@@ -461,9 +426,7 @@ bool OreAnalyzer::calibrateAndFilterSidePanels(float known_height_m,
     return false;
 
   // 1. Identify Left and Right Regions
-  // Assuming Y-axis is the cross-belt direction (or we find Principal
-  // Component) Let's use PCA to find the primary axes. Or simpler: Iterate to
-  // correct min/max Y.
+  // Assuming Y-axis is the cross-belt direction
   pcl::PointXYZ min_pt, max_pt;
   pcl::getMinMax3D(*aligned_cloud_, min_pt, max_pt);
 
@@ -701,4 +664,30 @@ void OreAnalyzer::filterSidePanels() {
 
   std::cout << "Removed " << indices_outside->indices.size()
             << " points outside belt boundaries (Manual Filter)." << std::endl;
+}
+
+void OreAnalyzer::filterGroundPoints() {
+  if (aligned_cloud_->empty())
+    return;
+
+  std::cout << "Filtering ground points (Z <= " << ground_threshold_ << ")..."
+            << std::endl;
+
+  pcl::ExtractIndices<PointT> extract;
+  extract.setInputCloud(aligned_cloud_);
+  pcl::PointIndices::Ptr ground_indices(new pcl::PointIndices);
+
+  for (size_t i = 0; i < aligned_cloud_->size(); ++i) {
+    if (aligned_cloud_->points[i].z <= ground_threshold_) {
+      ground_indices->indices.push_back(i);
+    }
+  }
+
+  extract.setIndices(ground_indices);
+  extract.setNegative(true); // Remove ground
+  extract.filter(*aligned_cloud_);
+
+  std::cout << "Removed " << ground_indices->indices.size()
+            << " ground points. Remaining: " << aligned_cloud_->size()
+            << std::endl;
 }

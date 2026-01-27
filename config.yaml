@@ -1,6 +1,6 @@
 # pcd_path: "E:/multi_source_info/lidar/pcd_data/SaveData_4.ply"
 pcd_path: "E:/multi_source_info/lidar/pcd_data/combined_cloud_0121.ply"
-unit_scale: 1.0 # 1.0 if file is meters, 0.001 if mm
+unit_scale: 0.003375 # Conversion factor from point cloud units to physical meters. usage: physical_meters = point_cloud_unit * unit_scale
 
 # Plane detection options
 save_plane_equation: false  # If true, save detected plane to this file
@@ -13,8 +13,13 @@ plane_b: -0.008955
 plane_c: 0.999960
 plane_d: -2.044467
 ground_threshold: 0.020702
-belt_min_y: -457.155731
-belt_max_y: 459.293762
-fit_belt_edges: False # If true, detect and calibrate side panels. If false, use belt_min_y/max_y directly.
-ground_filter_sigma: 6.0 # Multiplier for StdDev in ground threshold calculation
-ground_filter_margin: 1.0 # Fixed margin (in point cloud units) added to ground threshold
+belt_min_y: -458.361511
+belt_max_y: 459.648468
+fit_belt_edges: true # If true, detect and calibrate side panels. If false, use belt_min_y/max_y directly.
+ground_filter_sigma: 6.000000
+ground_filter_margin: 1.000000
+
+# Ore Detection (Euclidean Clustering)
+cluster_tolerance: 20.0 # Distance between points to be considered part of the same object (in point cloud units)
+min_cluster_size: 50    # Minimum number of points to form an ore chunk
+max_cluster_size: 50000 # Maximum number of points to form an ore chunk

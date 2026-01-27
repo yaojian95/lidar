@@ -103,6 +103,9 @@ public:
   // Explicitly Apply Filtering using current belt boundaries
   void filterSidePanels();
 
+  // Filter out ground points
+  void filterGroundPoints();
+
 private:
   // Belt Boundaries (Y-axis)
   float belt_min_y_ = -1e9f;

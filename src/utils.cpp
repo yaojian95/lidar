@@ -63,17 +63,17 @@ void saveConfigWithComments(const std::string &config_file,
   bool in_plane_section = false;
 
   while (std::getline(infile, line)) {
-    // Check if this line contains a plane coefficient
+    // Check if this line contains a plane coefficient or other updatable keys
     if (line.find("plane_a:") != std::string::npos ||
         line.find("plane_b:") != std::string::npos ||
         line.find("plane_c:") != std::string::npos ||
-        line.find("plane_d:") != std::string::npos ||
         line.find("plane_d:") != std::string::npos ||
         line.find("ground_threshold:") != std::string::npos ||
         line.find("belt_min_y:") != std::string::npos ||
         line.find("belt_max_y:") != std::string::npos ||
         line.find("ground_filter_sigma:") != std::string::npos ||
-        line.find("ground_filter_margin:") != std::string::npos) {
+        line.find("ground_filter_margin:") != std::string::npos ||
+        line.find("unit_scale:") != std::string::npos) {
 
       // Extract the key name
       std::string key;
@@ -95,6 +95,8 @@ void saveConfigWithComments(const std::string &config_file,
         key = "ground_filter_sigma";
       else if (line.find("ground_filter_margin:") != std::string::npos)
         key = "ground_filter_margin";
+      else if (line.find("unit_scale:") != std::string::npos)
+        key = "unit_scale";
 
       // Get leading whitespace
       size_t first_non_space = line.find_first_not_of(" \t");
@@ -104,7 +106,25 @@ void saveConfigWithComments(const std::string &config_file,
 
       // Replace with new value from config
       if (config[key]) {
+        // Special handling for comments if present?
+        // Simple approach: Replace the value part, keep the comment if we can parse it.
+        // But current logic completely replaces the line: line = indent + key + ": " + value
+        // This DESTROYS comments on the same line.
+        // The user specifically asked for comments to be preserved.
+        // My previous edit to config.yaml added a comment to unit_scale line.
+        // The current implementation of saveConfigWithComments overwrites the whole line.
+        
+        // Let's try to preserve the comment if it exists on the line.
+        std::string original_comment = "";
+        size_t comment_pos = line.find("#");
+        if (comment_pos != std::string::npos) {
+          original_comment = line.substr(comment_pos);
+        }
+
         line = indent + key + ": " + std::to_string(config[key].as<float>());
+        if (!original_comment.empty()) {
+           line += " " + original_comment;
+        }
       }
     }
     lines.push_back(line);

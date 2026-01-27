@@ -134,16 +134,9 @@ int main() {
                   << analyzer.getBeltMinY() << " to " << analyzer.getBeltMaxY()
                   << std::endl;
 
-        // Save to file
-        if (save_plane) { // Or generally save it? User said "save it".
-          saveConfigWithComments("E:/multi_source_info/lidar/config.yaml",
-                                 config);
-        } else {
-          // Even if save_plane is false, user might want to save calibration.
-          // Force save for calibration? Let's assume yes as per request.
-          saveConfigWithComments("E:/multi_source_info/lidar/config.yaml",
-                                 config);
-        }
+        // Always save if calibration was successful (to persist scale and belt)
+        saveConfigWithComments("E:/multi_source_info/lidar/config.yaml",
+                               config);
       } else {
         std::cout
             << "Side panel calibration failed or panels not found. Keeping "
@@ -158,9 +151,21 @@ int main() {
       analyzer.filterSidePanels();
     }
 
+    // Filter Ground Points (New Step)
+    analyzer.filterGroundPoints();
+
     // Auto-detection (LiDAR Clustering)
-    std::cout << "Detecting ores..." << std::endl;
-    auto ores = analyzer.detectByLidar();
+    float cluster_tolerance =
+        Config::get<float>(config, "cluster_tolerance", 0.05f);
+    int min_cluster_size = Config::get<int>(config, "min_cluster_size", 50);
+    int max_cluster_size = Config::get<int>(config, "max_cluster_size", 50000);
+
+    std::cout << "Detecting ores with tolerance=" << cluster_tolerance
+              << ", min_size=" << min_cluster_size
+              << ", max_size=" << max_cluster_size << "..." << std::endl;
+
+    auto ores =
+        analyzer.detectByLidar(cluster_tolerance, min_cluster_size, max_cluster_size);
     std::cout << "Found " << ores.size() << " potential ore chunks."
               << std::endl;
 
@@ -174,23 +179,7 @@ int main() {
   } else {
     std::cout << "Failed to align ground, showing original cloud." << std::endl;
   }
-
-  // Filter out ground points for visualization if aligned
-  if (aligned) {
-    pcl::PointCloud<pcl::PointXYZ>::Ptr non_ground(
-        new pcl::PointCloud<pcl::PointXYZ>);
-    for (const auto &pt : *cloud) {
-      if (pt.z > ground_threshold) {
-        non_ground->push_back(pt);
-      }
-    }
-    std::cout << "Visualization: Filtering ground points. Original: "
-              << cloud->size() << ", Non-ground: " << non_ground->size()
-              << std::endl;
-
-    // Update cloud to point to non_ground for visualization
-    cloud = non_ground;
-  }
+  // Visualization logic follows directly, no need to filter again
 
   // Center cloud for visualization
   Eigen::Vector4f centroid;

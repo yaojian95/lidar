@@ -13,5 +13,13 @@
         "CMAKE_CXX_COMPILER": "cl"
       }
     }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-vcpkg-build",
+      "displayName": "Build Windows (vcpkg + Ninja)",
+      "configurePreset": "windows-vcpkg",
+      "jobs": 2
+    }
   ]
 }
