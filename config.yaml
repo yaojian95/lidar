@@ -15,7 +15,7 @@ plane_d: -2.044467
 ground_threshold: 0.020702
 belt_min_y: -458.361511
 belt_max_y: 459.648468
-fit_belt_edges: true # If true, detect and calibrate side panels. If false, use belt_min_y/max_y directly.
+fit_belt_edges: false # If true, detect and calibrate side panels. If false, use belt_min_y/max_y directly.
 ground_filter_sigma: 6.000000
 ground_filter_margin: 1.000000
 

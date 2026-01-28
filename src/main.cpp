@@ -164,8 +164,8 @@ int main() {
               << ", min_size=" << min_cluster_size
               << ", max_size=" << max_cluster_size << "..." << std::endl;
 
-    auto ores =
-        analyzer.detectByLidar(cluster_tolerance, min_cluster_size, max_cluster_size);
+    auto ores = analyzer.detectByLidar(cluster_tolerance, min_cluster_size,
+                                       max_cluster_size);
     std::cout << "Found " << ores.size() << " potential ore chunks."
               << std::endl;
 
@@ -173,6 +173,19 @@ int main() {
       analyzer.computeStats(ore, false);
       std::cout << "Ore " << ore.id << ": Avg Thickness = " << ore.avg_thickness
                 << " (Max: " << ore.max_thickness << ")" << std::endl;
+    }
+
+    // Generate and Save Global Thickness Map
+    std::cout << "Generating Global Thickness Map..." << std::endl;
+    // Resolution: 1cm per pixel (0.01m)
+    auto thickness_map = analyzer.generateGlobalThicknessMap(ores, 0.01f);
+
+    std::string map_file =
+        "E:/multi_source_info/lidar/pcd_data/thickness_map.png";
+    if (analyzer.saveThicknessMapToImage(thickness_map, map_file)) {
+      std::cout << "Global Thickness Map saved to: " << map_file << std::endl;
+    } else {
+      std::cerr << "Failed to save thickness map!" << std::endl;
     }
 
     cloud = analyzer.getAlignedCloud();
@@ -230,32 +243,6 @@ int main() {
     viewer->setShapeRenderingProperties(
         pcl::visualization::PCL_VISUALIZER_COLOR, 1.0, 1.0, 1.0,
         "ground_plane"); // White
-
-    // // Draw Grid (Scales)
-    // double step = 10.0; // Grid every 10 units
-    // int grid_id = 0;
-
-    // // X-lines (varying Y)
-    // double start_x = std::floor(min_x / step) * step;
-    // for (double x = start_x; x <= max_x; x += step) {
-    //   pcl::PointXYZ p1(x, min_y, 0.0);
-    //   pcl::PointXYZ p2(x, max_y, 0.0);
-    //   std::string id = "grid_x_" + std::to_string(grid_id++);
-    //   viewer->addLine(p1, p2, 0.5, 0.5, 0.5, id);
-    // }
-
-    // // Y-lines (varying X)
-    // double start_y = std::floor(min_y / step) * step;
-    // for (double y = start_y; y <= max_y; y += step) {
-    //   pcl::PointXYZ p1(min_x, y, 0.0);
-    //   pcl::PointXYZ p2(max_x, y, 0.0);
-    //   std::string id = "grid_y_" + std::to_string(grid_id++);
-    //   viewer->addLine(p1, p2, 0.5, 0.5, 0.5, id);
-    // }
-
-    // std::cout << "Ground plane visualized (white transparent) with grid scale
-    // ("
-    //           << step << " units)." << std::endl;
   }
 
   viewer->resetCamera();

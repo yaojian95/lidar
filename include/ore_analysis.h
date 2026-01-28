@@ -114,4 +114,26 @@ private:
   // Ground Threshold Params
   float ground_sigma_ = 3.0f;
   float ground_margin_ = 0.005f;
+
+  // Global Thickness Map
+public:
+  struct ThicknessMap {
+    int width;
+    int height;
+    float resolution;        // meters per pixel
+    std::vector<float> data; // 1D grid (row-major)
+    float min_x;
+    float max_y; // Top-left origin convention usually
+  };
+
+  // Generate a global 2D matrix of thickness values covering all detected ores
+  ThicknessMap generateGlobalThicknessMap(const std::vector<Ore> &ores,
+                                          float resolution = 0.01f);
+
+  // Save the thickness map as a PGM image (grayscale)
+  // filename: output path
+  // max_val: value mapped to 255 (if <=0, uses max in map)
+  bool saveThicknessMapToImage(const ThicknessMap &map,
+                               const std::string &filename,
+                               float max_val = -1.0f);
 };

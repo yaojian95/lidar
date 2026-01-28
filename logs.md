@@ -1,3 +1,23 @@
+## 2026-01-28
+
+### 全局厚度图生成 (Global Thickness Map)
+- **功能新增**: 实现了 `generateGlobalThicknessMap` 函数，能够将所有检测到的矿石投影到一个二维矩阵中。
+- **坐标缩放修复**: 修复了分辨率计算问题。现在使用 `resolution / unit_scale` 计算像素分辨率，确保生成的图片像素代表真实的物理尺寸（例如 1像素=1厘米）。
+- **边界控制**:
+  - **X轴**: 根据检测到的矿石动态计算，避免因远处噪声导致图片无限宽。
+  - **Y轴**: 优先使用配置中的皮带边界 (`belt_min_y`, `belt_max_y`)，确保图片高度与皮带宽度严格对应。
+- **内存安全**: 增加了最大尺寸检查 (20000x20000)，防止内存溢出。
+
+### 图像保存 (Image Saving)
+- **OpenCV 集成**: 引入 OpenCV 库替代了手写的 PGM 保存代码。
+  - 修改 `CMakeLists.txt` 链接 OpenCV。
+  - 重写 `saveThicknessMapToImage` 使用 `cv::Mat` 和 `cv::imwrite`。
+  - 支持保存为 `.png` 格式（无损压缩）。
+- **图像转置**: 在保存前增加了 `cv::transpose`，使得输出图片的行列与 Python 后处理脚本 (`stack_png.py`) 的预期方向一致。
+
+### 代码重构 (Refactoring)
+- **地面过滤**: 将 `filterGroundPoints` 逻辑封装到 `OreAnalyzer` 类中。
+
 ## 2026-01-27
 
 ### 配置更新 (Configuration Updates)

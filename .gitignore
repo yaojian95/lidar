@@ -84,3 +84,6 @@ data/
 *.pcd
 *.ply
 *.bin
+
+*.jpg
+*.png

@@ -1,7 +1,9 @@
 #include "ore_analysis.h"
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <numeric>
+#include <opencv2/opencv.hpp>
 #include <pcl/common/common.h>
 #include <pcl/common/transforms.h>
 #include <pcl/filters/extract_indices.h>
@@ -690,4 +692,174 @@ void OreAnalyzer::filterGroundPoints() {
   std::cout << "Removed " << ground_indices->indices.size()
             << " ground points. Remaining: " << aligned_cloud_->size()
             << std::endl;
+}
+
+OreAnalyzer::ThicknessMap
+OreAnalyzer::generateGlobalThicknessMap(const std::vector<Ore> &ores,
+                                        float resolution) {
+  ThicknessMap map;
+  map.resolution = resolution;
+  map.width = 0;
+  map.height = 0;
+
+  if (ores.empty() || unit_scale_ <= 0.000001f)
+    return map;
+
+  // Convert physical resolution (meters) to point cloud units
+  // X units * unit_scale_ = resolution (meters)
+  // X point cloud units = resolution / unit_scale_
+  float resolution_raw = resolution / unit_scale_;
+
+  // 1. Determine Bounds based on DETECTED ORES only
+  // This avoids outliers in the rest of the cloud expanding the map to infinity
+  float min_x = 1e9, max_x = -1e9;
+  float min_y = 1e9, max_y = -1e9;
+
+  bool points_found = false;
+
+  for (const auto &ore : ores) {
+    if (!ore.point_indices)
+      continue;
+    for (int idx : ore.point_indices->indices) {
+      const auto &pt = aligned_cloud_->points[idx];
+      if (pt.x < min_x)
+        min_x = pt.x;
+      if (pt.x > max_x)
+        max_x = pt.x;
+      if (pt.y < min_y)
+        min_y = pt.y;
+      if (pt.y > max_y)
+        max_y = pt.y;
+      points_found = true;
+    }
+  }
+
+  if (!points_found)
+    return map;
+
+  // Use Belt Boundaries for Y if available
+  if (belt_min_y_ > -1e8 && belt_max_y_ < 1e8) {
+    min_y = belt_min_y_;
+    max_y = belt_max_y_;
+  }
+
+  // Add a small buffer (margin) logic
+  // Margin should be in raw units to keep image size reasonable
+  float margin_raw = resolution_raw * 5.0f; // 5 pixels margin
+
+  min_x -= margin_raw;
+  max_x += margin_raw;
+
+  if (belt_min_y_ <= -1e8 || belt_max_y_ >= 1e8) {
+    min_y -= margin_raw;
+    max_y += margin_raw;
+  }
+
+  // Validate Dimensions
+  int w = std::ceil((max_x - min_x) / resolution_raw);
+  int h = std::ceil((max_y - min_y) / resolution_raw);
+
+  // Sanity check
+  if (w > 20000 || h > 20000) {
+    std::cerr << "Error: Global Thickness Map too large! Dimensions: " << w
+              << "x" << h << ". Check unit_scale or resolution." << std::endl;
+    return map;
+  }
+
+  if (w <= 0 || h <= 0)
+    return map;
+
+  map.width = w;
+  map.height = h;
+  map.min_x = min_x;
+  map.max_y = max_y;
+
+  // Initialize with 0
+  try {
+    map.data.assign(w * h, 0.0f);
+  } catch (const std::bad_alloc &e) {
+    std::cerr << "Error: Failed to allocate memory for Thickness Map: "
+              << e.what() << std::endl;
+    map.width = 0;
+    map.height = 0;
+    return map;
+  }
+
+  std::cout << "Generating Global Thickness Map (" << map.width << "x"
+            << map.height << "), Res: " << resolution << "m (" << resolution_raw
+            << " raw units)"
+            << ". Bounds Raw: X[" << min_x << ", " << max_x << "] Y[" << min_y
+            << ", " << max_y << "]" << std::endl;
+
+  // 2. Fill the map
+  for (const auto &ore : ores) {
+    if (!ore.point_indices)
+      continue;
+    for (int idx : ore.point_indices->indices) {
+      const auto &pt = aligned_cloud_->points[idx];
+
+      int col = static_cast<int>((pt.x - min_x) / resolution_raw);
+      int row = static_cast<int>((max_y - pt.y) / resolution_raw);
+
+      if (col >= 0 && col < map.width && row >= 0 && row < map.height) {
+        float thick = pt.z * unit_scale_;
+        int index = row * map.width + col;
+        // Keep max thickness in cell
+        if (thick > map.data[index]) {
+          map.data[index] = thick;
+        }
+      }
+    }
+  }
+  return map;
+}
+
+bool OreAnalyzer::saveThicknessMapToImage(const ThicknessMap &map,
+                                          const std::string &filename,
+                                          float max_val) {
+  if (map.data.empty() || map.width <= 0 || map.height <= 0)
+    return false;
+
+  int w = map.width;
+  int h = map.height;
+
+  // Determine scaling factor
+  float max_v = max_val;
+  if (max_v <= 0.0f) {
+    max_v = 0.0f;
+    for (float v : map.data) {
+      if (v > max_v)
+        max_v = v;
+    }
+  }
+
+  if (max_v <= 0.000001f)
+    max_v = 1.0f; // Avoid div/0
+
+  std::cout << "Saving Map to " << filename << ". Max Val: " << max_v
+            << " mapped to 255." << std::endl;
+
+  // Create OpenCV Mat (Height, Width, Type)
+  cv::Mat image(h, w, CV_8UC1);
+
+  for (int r = 0; r < h; ++r) {
+    for (int c = 0; c < w; ++c) {
+      float val = map.data[r * w + c];
+      int pixel_val = static_cast<int>((val / max_v) * 255.0f);
+      if (pixel_val > 255)
+        pixel_val = 255;
+      if (pixel_val < 0)
+        pixel_val = 0;
+
+      image.at<uint8_t>(r, c) = static_cast<uint8_t>(pixel_val);
+    }
+  }
+
+  // Transpose the image as requested
+  cv::Mat transposed_image;
+  cv::transpose(image, transposed_image);
+
+  // Save using OpenCV
+  // Note: OpenCV supports .pgm, .png, .jpg etc. based on extension
+  return cv::imwrite(filename, transposed_image);
 }

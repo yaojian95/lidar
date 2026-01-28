@@ -20,11 +20,14 @@ graph TD
     D --> E[Ground Alignment]
     D --> F[Ore Detection]
     D --> G[Thickness Calculation]
+    D --> M[Global Thickness Map]
     F --> H[LiDAR Clustering]
     F --> I[ROI Filtering]
     F --> J[Mask Filtering]
     G --> K[Average Thickness]
-    G --> L[Thickness Map]
+    G --> L[Local Thickness Map]
+    M --> N[Generate 2D Map]
+    M --> O[Save Image (OpenCV)]
 ```
 
 ---
@@ -33,36 +36,39 @@ graph TD
 
 ### `config.yaml`
 ```yaml
-pcd_path: "E:/multi_source_info/lidar/pcd_data/vzcoal-detect-data-16.pcd"
-unit_scale: 1.0 # 单位转换系数
+pcd_path: "E:/multi_source_info/lidar/pcd_data/combined_cloud_0121.ply"
+unit_scale: 0.003375 # 单位转换系数 (0.003375 for millimeters to meters if raw data is large int)
 
 # 平面检测选项
 save_plane_equation: false  # 如果为 true，保存检测到的平面到配置文件
-visual_plane: true          # 如果为 true，在可视化窗口中显示地面平面
+visual_plane: false         # 如果为 true，在可视化窗口中显示地面平面
 
 # 平面方程 (当 save_plane_equation=true 时自动填充，或手动设置)
-# 格式: ax + by + cz + d = 0
-# plane_a: 0.0
-# plane_b: 0.0
-# plane_c: 1.0
-# plane_d: 0.0
+plane_a: 0.000003
+plane_b: -0.008955
+plane_c: 0.999960
+plane_d: -2.044467
+ground_threshold: 0.020702  # RANSAC 距离阈值
+
+# 皮带边界 (Y轴)
+belt_min_y: -458.361511
+belt_max_y: 459.648468
+fit_belt_edges: false       # 是否自动拟合皮带边缘
+
+# 矿石检测参数 (欧几里得聚类)
+cluster_tolerance: 20.0     # 聚类距离阈值
+min_cluster_size: 50        # 最小点数
+max_cluster_size: 50000     # 最大点数
 ```
 
 **参数说明**:
-- `pcd_path`: 点云文件路径，支持 `.pcd` 和 `.ply` 格式
-- `unit_scale`: 物理单位转换系数
-  - `1.0`: 文件单位是米，输出也是米
-  - `1000.0`: 文件单位是米，输出转换为毫米
-  - `0.001`: 文件单位是毫米，输出转换为米
-- `save_plane_equation`: **平面缓存开关**
-  - `true`: 检测平面后，将平面方程保存到配置文件（避免重复计算）
-  - `false`: 不保存，每次运行都重新检测
-- `visual_plane`: **平面可视化开关**
-  - `true`: 在 PCL Viewer 中显示绿色半透明的地面平面（Z=0）
-  - `false`: 不显示平面
-- `plane_a, plane_b, plane_c, plane_d`: **缓存的平面方程系数**
-  - 如果存在且 `save_plane_equation=false`，程序会直接使用这些系数，跳过 RANSAC 计算
-  - 格式: $ax + by + cz + d = 0$，其中 $(a, b, c)$ 是法向量
+- `pcd_path`: 点云文件路径。
+- `unit_scale`: 物理单位转换系数。例如 `0.003375` 可能用于将特定传感器单位转换为米。
+- `save_plane_equation`: **平面缓存开关**。`true` 表示保存检测结果，避免重复计算。
+- `plane_a/b/c/d`: 缓存的平面方程系数。
+- `belt_min_y`, `belt_max_y`: **皮带物理边界**。用于限制生成的厚度图的高度，确保图像与实地皮带宽度对应。
+- `cluster_tolerance`: **聚类容差**。判定两个点是否属于同一块矿石的距离阈值。
+- `min/max_cluster_size`: 矿石点数的有效范围，过滤噪声和过大误检。
 
 ---
 
@@ -304,6 +310,16 @@ struct Ore {
     float map_resolution;                    // 网格分辨率
     float map_min_x, map_min_y;              // 网格原点
 };
+
+// 全局厚度图结构体
+struct ThicknessMap {
+    int width;
+    int height;
+    float resolution;        // meters per pixel
+    std::vector<float> data; // 1D grid (row-major)
+    float min_x;
+    float max_y;             // Top-left origin convention
+};
 ```
 
 ---
@@ -323,6 +339,15 @@ private:
     float plane_b_ = 0.0f;
     float plane_c_ = 1.0f;
     float plane_d_ = 0.0f;
+
+public:
+    // ... 现有方法 ...
+
+    // 生成全局厚度图
+    void generateGlobalThicknessMap(float resolution, const std::string& output_filename, float min_val = 0.0f);
+
+    // 保存厚度图为图片 (使用 OpenCV)
+    bool saveThicknessMapToImage(const ThicknessMap& map, const std::string& filename);
 ```
 
 ---
@@ -898,4 +923,56 @@ analyzer.computeStats(ore, false);
 - 添加了平面可视化功能 (`visual_plane`)
 - 添加了平面方程缓存功能 (`save_plane_equation`)
 - 新增 `alignToGroundWithPlane()` 和 `getPlaneCoefficients()` 方法
-- 新增 `Config` 辅助类和模板方法 `get<T>()`
+
+---
+
+## 6. 全局厚度图与 OpenCV 集成
+
+### 6.1 功能目标
+将所有检测到的矿石厚度信息投影到一个二维平面的灰度图中，用于后续的拼接和分析。
+
+### 6.2 实现原理 (`generateGlobalThicknessMap`)
+
+**坐标映射**:
+为了确保图片上的 1 个像素对应实际物理世界的固定长度（如 1cm），我们需要进行单位换算。
+```cpp
+// 物理分辨率 (米) -> 点云原始单位
+float resolution_raw = resolution / unit_scale_;
+```
+
+**边界确定**:
+- **X 轴 (长度)**: 由检测到的矿石实际分布范围决定，动态调整。
+- **Y 轴 (宽度)**: 强制使用皮带的物理边界 (`belt_min_y` 到 `belt_max_y`)，确保每一帧生成的图片高度一致，方便拼接。
+
+**投影逻辑**:
+使用扁平的一维向量 `std::vector<float> data` 存储矩阵，减少内存碎片。
+```cpp
+int col = (pt.x - min_x) / resolution_raw;
+int row = (max_y - pt.y) / resolution_raw; // 注意 Y 轴方向通常翻转
+int index = row * width + col;
+// 取最大厚度
+if (thickness > data[index]) data[index] = thickness;
+```
+
+### 6.3 OpenCV 保存 (`saveThicknessMapToImage`)
+
+**依赖**:
+`CMakeLists.txt` 中集成了 OpenCV：
+```cmake
+find_package(OpenCV REQUIRED)
+target_link_libraries(pcl_demo PRIVATE ${OpenCV_LIBS})
+```
+
+**实现**:
+使用 `cv::Mat` 存储数据，并利用 `cv::imwrite` 保存为无损 PNG 格式。
+在保存前，我们执行了 **转置操作 (`cv::transpose`)**，这是为了匹配下游 Python 拼接脚本 (`stack_png.py`) 的输入要求。
+
+```cpp
+cv::Mat image(h, w, CV_8UC1);
+// ... 填充数据并归一化到 0-255 ...
+
+cv::Mat transposed_image;
+cv::transpose(image, transposed_image); // 核心：转置
+cv::imwrite(filename, transposed_image);
+```
+
