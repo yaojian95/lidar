@@ -129,6 +129,29 @@ bool OreAnalyzer::alignToGroundWithPlane(float a, float b, float c, float d) {
   Eigen::Vector3f normal(a, b, c);
   Eigen::Vector3f target_normal(0, 0, 1);
 
+  // Calculate angle between normal and Z-axis
+  // dot = |n|*|z|*cos(theta). n and z are vectors.
+  float dot = normal.dot(target_normal);
+  float norm_n = normal.norm();
+  float norm_z = target_normal.norm();
+  float cos_theta = dot / (norm_n * norm_z);
+  // Clamp to [-1, 1] to avoid NaN
+  if (cos_theta > 1.0f)
+    cos_theta = 1.0f;
+  if (cos_theta < -1.0f)
+    cos_theta = -1.0f;
+  float angle_rad = std::acos(cos_theta);
+  float angle_deg = angle_rad * 180.0f / 3.14159265f;
+
+  std::cout << "Ground Plane Alignment:" << std::endl;
+  std::cout << "  Normal: (" << a << ", " << b << ", " << c << ")" << std::endl;
+  std::cout << "  Tilt Angle (vs Z-axis): " << angle_deg << " degrees"
+            << std::endl;
+  if (angle_deg > 10.0f) {
+    std::cout << "  [WARNING] Large tilt detected! Check sensor mounting."
+              << std::endl;
+  }
+
   Eigen::Quaternionf rotation;
   rotation.setFromTwoVectors(normal, target_normal);
 
@@ -198,13 +221,38 @@ std::vector<Ore> OreAnalyzer::detectByLidar(float cluster_tolerance,
   ec.setInputCloud(aligned_cloud_);
   ec.extract(cluster_indices);
 
+  // Helper struct for sorting
+  struct ClusterInfo {
+    pcl::PointIndices indices;
+    float center_x;
+  };
+  std::vector<ClusterInfo> sorted_clusters;
+
+  for (const auto &indices : cluster_indices) {
+    if (indices.indices.empty())
+      continue;
+
+    // Calculate Centroid X
+    float sum_x = 0.0f;
+    for (int idx : indices.indices) {
+      sum_x += aligned_cloud_->points[idx].x;
+    }
+    float avg_x = sum_x / indices.indices.size();
+    sorted_clusters.push_back({indices, avg_x});
+  }
+
+  // Sort by Center X (Ascending)
+  std::sort(sorted_clusters.begin(), sorted_clusters.end(),
+            [](const ClusterInfo &a, const ClusterInfo &b) {
+              return a.center_x < b.center_x;
+            });
+
   int ore_id = 0;
-  for (const auto &it : cluster_indices) {
+  for (const auto &info : sorted_clusters) {
     Ore ore;
     ore.id = "ore_" + std::to_string(ore_id++);
     ore.point_indices.reset(new pcl::PointIndices);
-    // Indices now map 1:1 since we are clustering the aligned_cloud_ directly
-    ore.point_indices->indices = it.indices;
+    ore.point_indices->indices = info.indices.indices;
     ores.push_back(ore);
   }
   return ores;
@@ -816,7 +864,8 @@ OreAnalyzer::generateGlobalThicknessMap(const std::vector<Ore> &ores,
 
 bool OreAnalyzer::saveThicknessMapToImage(const ThicknessMap &map,
                                           const std::string &filename,
-                                          float max_val) {
+                                          float max_val,
+                                          const std::vector<Ore> *ores) {
   if (map.data.empty() || map.width <= 0 || map.height <= 0)
     return false;
 
@@ -858,8 +907,214 @@ bool OreAnalyzer::saveThicknessMapToImage(const ThicknessMap &map,
   // Transpose the image as requested
   cv::Mat transposed_image;
   cv::transpose(image, transposed_image);
+  // Also flip required? User said "Left/Right matches".
+  // Let's assume transpose is enough for now.
 
   // Save using OpenCV
   // Note: OpenCV supports .pgm, .png, .jpg etc. based on extension
   return cv::imwrite(filename, transposed_image);
+}
+
+// Fuse Thickness Map with RGB Image
+bool OreAnalyzer::fuseThicknessWithImage(const ThicknessMap &map,
+                                         const std::string &rgb_filename,
+                                         const std::string &output_filename,
+                                         int channel, FusionCrops rgb_crops,
+                                         FusionCrops lidar_crops,
+                                         const std::vector<Ore> *ores) {
+  if (map.data.empty() || map.width <= 0 || map.height <= 0) {
+    std::cerr << "Error: Thickness map is empty." << std::endl;
+    return false;
+  }
+
+  // 1. Load RGB Image
+  cv::Mat rgb_image = cv::imread(rgb_filename);
+  if (rgb_image.empty()) {
+    std::cerr << "Error: Could not read RGB image from " << rgb_filename
+              << std::endl;
+    return false;
+  }
+
+  std::cout << "Loaded RGB Image: " << rgb_image.cols << "x" << rgb_image.rows
+            << std::endl;
+
+  // 2. Convert Thickness Map to CV Matrix
+  // Original Map: Width x Height
+  // User says: "stitched_ore.jpg matches the saved thickness map"
+  // But saved thickness map was TRANSPOSED in saveThicknessMapToImage.
+  // So the "aligned" orientation is the TRANSPOSED one.
+
+  // Let's reconstruct the map as we saved it (Transposed)
+  cv::Mat map_mat(map.height, map.width, CV_32FC1);
+  // Find max value for normalization
+  float max_v = 0.0f;
+  for (int r = 0; r < map.height; ++r) {
+    for (int c = 0; c < map.width; ++c) {
+      float val = map.data[r * map.width + c];
+      if (val > max_v)
+        max_v = val;
+      map_mat.at<float>(r, c) = val;
+    }
+  }
+
+  if (max_v <= 0.000001f)
+    max_v = 1.0f;
+  // Transpose to match the saved image (and thus the RGB image)
+  cv::Mat map_transposed;
+  cv::transpose(map_mat, map_transposed);
+
+  // 3. Define ROIs
+  // Source ROI (LiDAR Thickness Map)
+  cv::Rect src_roi(lidar_crops.left, lidar_crops.up,
+                   map_transposed.cols - lidar_crops.left - lidar_crops.right,
+                   map_transposed.rows - lidar_crops.up - lidar_crops.down);
+
+  // Target ROI (RGB Image)
+  cv::Rect tgt_roi(rgb_crops.left, rgb_crops.up,
+                   rgb_image.cols - rgb_crops.left - rgb_crops.right,
+                   rgb_image.rows - rgb_crops.up - rgb_crops.down);
+
+  // Validate ROIs
+  if (src_roi.width <= 0 || src_roi.height <= 0 || src_roi.x < 0 ||
+      src_roi.y < 0 || src_roi.x + src_roi.width > map_transposed.cols ||
+      src_roi.y + src_roi.height > map_transposed.rows) {
+    std::cerr
+        << "Error: Invalid LiDAR crops. Resulting ROI is invalid or empty."
+        << std::endl;
+    return false;
+  }
+  if (tgt_roi.width <= 0 || tgt_roi.height <= 0 || tgt_roi.x < 0 ||
+      tgt_roi.y < 0 || tgt_roi.x + tgt_roi.width > rgb_image.cols ||
+      tgt_roi.y + tgt_roi.height > rgb_image.rows) {
+    std::cerr << "Error: Invalid RGB crops. Resulting ROI is invalid or empty."
+              << std::endl;
+    return false;
+  }
+
+  // Crop Source
+  cv::Mat map_cropped = map_transposed(src_roi);
+
+  // Crop Target (RGB)
+  // We clone it so that the output image is physically smaller (just the ROI)
+  cv::Mat final_image = rgb_image(tgt_roi).clone();
+
+  // Resize Cropped Source to fit Target ROI
+  cv::Mat map_resized;
+  cv::resize(map_cropped, map_resized, final_image.size(), 0, 0,
+             cv::INTER_LINEAR);
+
+  // Calculate Scale Factors for label mapping
+  float scale_x = static_cast<float>(final_image.cols) / map_cropped.cols;
+  float scale_y = static_cast<float>(final_image.rows) / map_cropped.rows;
+
+  std::cout << "Fusion ROI Alignment:" << std::endl;
+  std::cout << "  LiDAR ROI: " << src_roi.width << "x" << src_roi.height
+            << " (from " << map_transposed.cols << "x" << map_transposed.rows
+            << ")" << std::endl;
+  std::cout << "  RGB ROI:   " << tgt_roi.width << "x" << tgt_roi.height
+            << " (Target)" << std::endl;
+  std::cout << "  Scale:     x=" << scale_x << ", y=" << scale_y << std::endl;
+
+  // 4. Overlay
+  if (channel < 0 || channel > 2)
+    channel = 2; // Default Red
+
+  for (int r = 0; r < map_resized.rows; ++r) {
+    for (int c = 0; c < map_resized.cols; ++c) {
+      float val = map_resized.at<float>(r, c);
+
+      // Handle "Empty" values
+      if (val <= 0.001f)
+        continue;
+
+      // Position in Final Image (Already Cropped)
+      int rgb_r = r;
+      int rgb_c = c;
+
+      if (rgb_r >= 0 && rgb_r < final_image.rows && rgb_c >= 0 &&
+          rgb_c < final_image.cols) {
+
+        // Normalize and clamp
+        float norm_val = (val / max_v) * 255.0f;
+        if (norm_val > 255.0f)
+          norm_val = 255.0f;
+
+        // Inject into channel
+        if (final_image.type() == CV_8UC3) {
+          final_image.at<cv::Vec3b>(rgb_r, rgb_c)[channel] =
+              static_cast<uint8_t>(norm_val);
+        }
+      }
+    }
+  }
+
+  // 5. Draw Labels if provided
+  if (ores) {
+    for (const auto &ore : *ores) {
+      if (!ore.point_indices || ore.point_indices->indices.empty()) {
+        continue;
+      }
+      // Calculate Centroid (Physical Units)
+      float cx = (ore.min_x + ore.max_x) / 2.0f;
+      float cy = (ore.min_y + ore.max_y) / 2.0f;
+
+      // Map to Map Grid (Original Map)
+      // Note: map.resolution is in METERS (e.g. 0.01), but the grid is built in
+      // RAW UNITS. We need to recover resolution_raw used during generation.
+      // resolution_raw = resolution / unit_scale_
+      float resolution_raw = map.resolution / unit_scale_;
+      if (unit_scale_ <= 1e-6f)
+        resolution_raw = 1.0f; // Safety
+
+      // col = (cx - min_x) / res_raw
+      // row = (max_y - cy) / res_raw
+      int col_map = static_cast<int>((cx - map.min_x) / resolution_raw);
+      int row_map = static_cast<int>((map.max_y - cy) / resolution_raw);
+
+      // Logic for map_transposed:
+      // map_mat(row_map, col_map) maps to map_transposed(col_map, row_map)
+      // So in transposed image: row index is col_map, col index is row_map.
+      int r_trans = col_map;
+      int c_trans = row_map;
+
+      // Apply Source Crop Offset
+      // The point must be inside the source ROI to be visible
+      int r_cropped = r_trans - src_roi.y;
+      int c_cropped = c_trans - src_roi.x;
+
+      // Scale to Target ROI
+      int r_scaled = static_cast<int>(r_cropped * scale_y);
+      int c_scaled = static_cast<int>(c_cropped * scale_x);
+
+      // Apply Target ROI Offset (Position in RGB)
+      // Since final_image IS the ROI, the offset is 0 relative to it.
+      int rgb_r = r_scaled;
+      int rgb_c = c_scaled;
+
+      // Draw Text
+      if (rgb_r >= 0 && rgb_r < final_image.rows && rgb_c >= 0 &&
+          rgb_c < final_image.cols) {
+        std::string label = ore.id;
+        // Remove "ore_" prefix if present
+        if (label.find("ore_") == 0) {
+          label = label.substr(4);
+        }
+
+        // Text Color: White (255, 255, 255)
+        // Position: Point(x, y) = (col, row)
+        cv::Point pos(rgb_c, rgb_r);
+        cv::putText(final_image, label, pos, cv::FONT_HERSHEY_SIMPLEX, 4.0,
+                    cv::Scalar(255, 255, 255), 5);
+      }
+    }
+  }
+
+  // 6. Save
+  std::cout << "Saving Fused Image to " << output_filename << std::endl;
+  if (cv::imwrite(output_filename, final_image)) {
+    return true;
+  } else {
+    std::cerr << "Error: Could not save fused image." << std::endl;
+    return false;
+  }
 }

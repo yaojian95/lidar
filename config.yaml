@@ -23,3 +23,24 @@ ground_filter_margin: 1.000000
 cluster_tolerance: 20.0 # Distance between points to be considered part of the same object (in point cloud units)
 min_cluster_size: 50    # Minimum number of points to form an ore chunk
 max_cluster_size: 50000 # Maximum number of points to form an ore chunk
+
+# Fusion Options
+fusion_channel: 2      # 0=Blue, 1=Green, 2=Red
+
+#aup and down means direction aligned with the betl
+#left and right means direction across the belt
+# RGB ROI Crops (Define the Valid Area on the RGB Image)
+rgb_crop_up: 690
+rgb_crop_down: 0
+rgb_crop_left: 140
+rgb_crop_right: 90
+
+# LiDAR ROI Crops (Define the Valid Area on the Thickness Map)
+# Use this to match the physical FOV of the RGB crop
+lidar_crop_up: 0
+lidar_crop_down: 3
+lidar_crop_left: 15
+lidar_crop_right: 0
+
+# Visualization
+enable_visualization: false # Enable/Disable PCL visualization window

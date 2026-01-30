@@ -12,6 +12,14 @@
         "CMAKE_C_COMPILER": "cl",
         "CMAKE_CXX_COMPILER": "cl"
       }
+    },
+    {
+      "name": "windows-release",
+      "displayName": "Windows Release (vcpkg + Ninja)",
+      "inherits": "windows-vcpkg",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     }
   ],
   "buildPresets": [
@@ -20,6 +28,11 @@
       "displayName": "Build Windows (vcpkg + Ninja)",
       "configurePreset": "windows-vcpkg",
       "jobs": 2
+    },
+    {
+      "name": "windows-release-build",
+      "displayName": "Build Windows Release",
+      "configurePreset": "windows-release"
     }
   ]
 }

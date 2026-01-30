@@ -133,7 +133,32 @@ public:
   // Save the thickness map as a PGM image (grayscale)
   // filename: output path
   // max_val: value mapped to 255 (if <=0, uses max in map)
+  // Save the thickness map as a PGM image (grayscale)
+  // filename: output path
+  // max_val: value mapped to 255 (if <=0, uses max in map)
+  // ores: Optional pointer to ores list for labeling IDs
   bool saveThicknessMapToImage(const ThicknessMap &map,
                                const std::string &filename,
-                               float max_val = -1.0f);
+                               float max_val = -1.0f,
+                               const std::vector<Ore> *ores = nullptr);
+
+  struct FusionCrops {
+    int up = 0;
+    int down = 0;
+    int left = 0;
+    int right = 0;
+  };
+
+  // Fuse Thickness Map with RGB Image
+  // rgb_filename: path to the RGB image (e.g., stiched_ore.jpg)
+  // output_filename: path to save the fused image
+  // channel: 0=Blue, 1=Green, 2=Red (default)
+  // rgb_crops: Crops for the RGB image
+  // lidar_crops: Crops for the LiDAR Thickness Map
+  // ores: Optional pointer to ores list for labeling IDs on the RGB image
+  bool fuseThicknessWithImage(const ThicknessMap &map,
+                              const std::string &rgb_filename,
+                              const std::string &output_filename, int channel,
+                              FusionCrops rgb_crops, FusionCrops lidar_crops,
+                              const std::vector<Ore> *ores = nullptr);
 };

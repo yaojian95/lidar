@@ -1,6 +1,7 @@
 #include "ore_analysis.h"
 #include "utils.h"
 #include <iostream>
+#include <opencv2/core/utils/logger.hpp>
 #include <pcl/common/centroid.h>
 #include <pcl/common/common.h>
 #include <pcl/common/transforms.h>
@@ -11,6 +12,7 @@
 #include <thread>
 
 int main() {
+  // cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
   // Load configuration
   YAML::Node config = Config::load("E:/multi_source_info/lidar/config.yaml");
   if (!config) {
@@ -171,8 +173,9 @@ int main() {
 
     for (auto &ore : ores) {
       analyzer.computeStats(ore, false);
-      std::cout << "Ore " << ore.id << ": Avg Thickness = " << ore.avg_thickness
-                << " (Max: " << ore.max_thickness << ")" << std::endl;
+      // std::cout << "Ore " << ore.id << ": Avg Thickness = " <<
+      // ore.avg_thickness
+      //           << " (Max: " << ore.max_thickness << ")" << std::endl;
     }
 
     // Generate and Save Global Thickness Map
@@ -182,76 +185,120 @@ int main() {
 
     std::string map_file =
         "E:/multi_source_info/lidar/pcd_data/thickness_map.png";
-    if (analyzer.saveThicknessMapToImage(thickness_map, map_file)) {
+
+    // Pass ores for labeling - NO, user wanted valid labels on RGB.
+    if (analyzer.saveThicknessMapToImage(thickness_map, map_file, -1.0f)) {
       std::cout << "Global Thickness Map saved to: " << map_file << std::endl;
+
     } else {
       std::cerr << "Failed to save thickness map!" << std::endl;
+    }
+
+    // FUSE Thickness with RGB Image
+    int fusion_channel = Config::get<int>(config, "fusion_channel", 2);
+    // Separate offsets
+    // RGB Crops
+    OreAnalyzer::FusionCrops rgb_crops;
+    rgb_crops.up = Config::get<int>(config, "rgb_crop_up", 0);
+    rgb_crops.down = Config::get<int>(config, "rgb_crop_down", 0);
+    rgb_crops.left = Config::get<int>(config, "rgb_crop_left", 0);
+    rgb_crops.right = Config::get<int>(config, "rgb_crop_right", 0);
+
+    // LiDAR Crops
+    OreAnalyzer::FusionCrops lidar_crops;
+    lidar_crops.up = Config::get<int>(config, "lidar_crop_up", 0);
+    lidar_crops.down = Config::get<int>(config, "lidar_crop_down", 0);
+    lidar_crops.left = Config::get<int>(config, "lidar_crop_left", 0);
+    lidar_crops.right = Config::get<int>(config, "lidar_crop_right", 0);
+
+    std::string rgb_path =
+        "E:/multi_source_info/lidar/pcd_data/stitched_ore.jpg";
+    std::string fused_path =
+        "E:/multi_source_info/lidar/pcd_data/fused_thickness.jpg";
+
+    std::cout << "Fusing thickness map with RGB image..." << std::endl;
+    // Pass &ores for labeling on Fused Image
+    if (analyzer.fuseThicknessWithImage(thickness_map, rgb_path, fused_path,
+                                        fusion_channel, rgb_crops, lidar_crops,
+                                        &ores)) {
+      std::cout << "Fused image saved to: " << fused_path << std::endl;
+    } else {
+      std::cerr << "Failed to fuse thickness map with RGB image." << std::endl;
     }
 
     cloud = analyzer.getAlignedCloud();
   } else {
     std::cout << "Failed to align ground, showing original cloud." << std::endl;
   }
-  // Visualization logic follows directly, no need to filter again
 
-  // Center cloud for visualization
-  Eigen::Vector4f centroid;
-  pcl::compute3DCentroid(*cloud, centroid);
-  std::cout << "Point Cloud Quantized Centroid: " << centroid[0] << ", "
-            << centroid[1] << ", " << centroid[2] << std::endl;
+  // Visualization Control
+  bool enable_visualization =
+      Config::get<bool>(config, "enable_visualization", true);
 
-  // Shift to center (X, Y) but keep Z (ground plane at 0)
-  Eigen::Matrix4f transform_centering = Eigen::Matrix4f::Identity();
-  transform_centering(0, 3) = -centroid[0];
-  transform_centering(1, 3) = -centroid[1];
-  // Z remains 0
+  if (enable_visualization) {
+    // Visualization logic follows directly, no need to filter again
 
-  pcl::transformPointCloud(*cloud, *cloud, transform_centering);
+    // Center cloud for visualization
+    Eigen::Vector4f centroid;
+    pcl::compute3DCentroid(*cloud, centroid);
+    std::cout << "Point Cloud Quantized Centroid: " << centroid[0] << ", "
+              << centroid[1] << ", " << centroid[2] << std::endl;
 
-  // Visualization
-  pcl::visualization::PCLVisualizer::Ptr viewer(
-      new pcl::visualization::PCLVisualizer("PCD Viewer"));
+    // Shift to center (X, Y) but keep Z (ground plane at 0)
+    Eigen::Matrix4f transform_centering = Eigen::Matrix4f::Identity();
+    transform_centering(0, 3) = -centroid[0];
+    transform_centering(1, 3) = -centroid[1];
+    // Z remains 0
 
-  viewer->setBackgroundColor(0, 0, 0);
+    pcl::transformPointCloud(*cloud, *cloud, transform_centering);
 
-  // Color points by height (Z)
-  pcl::visualization::PointCloudColorHandlerGenericField<pcl::PointXYZ> z_color(
-      cloud, "z");
-  viewer->addPointCloud<pcl::PointXYZ>(cloud, z_color, "cloud");
+    // Visualization
+    pcl::visualization::PCLVisualizer::Ptr viewer(
+        new pcl::visualization::PCLVisualizer("PCD Viewer"));
 
-  viewer->setPointCloudRenderingProperties(
-      pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "cloud");
+    viewer->setBackgroundColor(0, 0, 0);
 
-  // Visualize ground plane if requested
-  if (visual_plane && aligned) {
-    // Calcluate bounds for ground plane and grid
-    pcl::PointXYZ min_pt, max_pt;
-    pcl::getMinMax3D(*cloud, min_pt, max_pt);
+    // Color points by height (Z)
+    pcl::visualization::PointCloudColorHandlerGenericField<pcl::PointXYZ>
+        z_color(cloud, "z");
+    viewer->addPointCloud<pcl::PointXYZ>(cloud, z_color, "cloud");
 
-    // Add some margin
-    double margin = 5.0;
-    double min_x = min_pt.x - margin;
-    double max_x = max_pt.x + margin;
-    double min_y = min_pt.y - margin;
-    double max_y = max_pt.y + margin;
+    viewer->setPointCloudRenderingProperties(
+        pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "cloud");
 
-    // Draw Ground as a thin cube (visualized as plane)
-    viewer->addCube(min_x, max_x, min_y, max_y, -0.1, 0.0, 1.0, 1.0, 1.0,
-                    "ground_plane");
-    viewer->setShapeRenderingProperties(
-        pcl::visualization::PCL_VISUALIZER_OPACITY, 0.3, "ground_plane");
-    viewer->setShapeRenderingProperties(
-        pcl::visualization::PCL_VISUALIZER_COLOR, 1.0, 1.0, 1.0,
-        "ground_plane"); // White
-  }
+    // Visualize ground plane if requested
+    if (visual_plane && aligned) {
+      // Calcluate bounds for ground plane and grid
+      pcl::PointXYZ min_pt, max_pt;
+      pcl::getMinMax3D(*cloud, min_pt, max_pt);
 
-  viewer->resetCamera();
-  viewer->addCoordinateSystem(1.0);
-  viewer->initCameraParameters();
+      // Add some margin
+      double margin = 5.0;
+      double min_x = min_pt.x - margin;
+      double max_x = max_pt.x + margin;
+      double min_y = min_pt.y - margin;
+      double max_y = max_pt.y + margin;
 
-  while (!viewer->wasStopped()) {
-    viewer->spinOnce(100);
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      // Draw Ground as a thin cube (visualized as plane)
+      viewer->addCube(min_x, max_x, min_y, max_y, -0.1, 0.0, 1.0, 1.0, 1.0,
+                      "ground_plane");
+      viewer->setShapeRenderingProperties(
+          pcl::visualization::PCL_VISUALIZER_OPACITY, 0.3, "ground_plane");
+      viewer->setShapeRenderingProperties(
+          pcl::visualization::PCL_VISUALIZER_COLOR, 1.0, 1.0, 1.0,
+          "ground_plane"); // White
+    }
+
+    viewer->resetCamera();
+    viewer->addCoordinateSystem(1.0);
+    viewer->initCameraParameters();
+
+    while (!viewer->wasStopped()) {
+      viewer->spinOnce(100);
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+  } else {
+    std::cout << "Visualization disabled in config." << std::endl;
   }
 
   return 0;

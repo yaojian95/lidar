@@ -6,7 +6,8 @@
 3. [工具函数 (utils)](#工具函数)
 4. [核心分析类 (OreAnalyzer)](#核心分析类)
 5. [主程序 (main.cpp)](#主程序)
-6. [构建配置 (CMakeLists.txt)](#构建配置)
+6. [全局厚度图 (Global Thickness Map)](#全局厚度图与-opencv-集成)
+7. [融合与可视化 (Fusion & Visualization)](#融合与可视化-fusion--visualization)
 
 ---
 
@@ -974,5 +975,56 @@ cv::Mat image(h, w, CV_8UC1);
 cv::Mat transposed_image;
 cv::transpose(image, transposed_image); // 核心：转置
 cv::imwrite(filename, transposed_image);
+```
+
+
+
+---
+
+## 7. 融合与可视化 (Fusion & Visualization)
+
+### 7.1 双源 ROI 对齐 (Dual-Source ROI Alignment)
+
+**背景**:
+RGB 相机和 LiDAR 传感器通常具有不同的视场 (FOV) 和分辨率。直接叠加会导致像素错位。为了解决这个问题，我们引入了 **双源 ROI 裁剪机制**。
+
+**原理**:
+1. **定义源 ROI (LiDAR)**: 在原始厚度图上定义一个有效矩形区域 (`lidar_crop_*`)。
+2. **定义目标 ROI (RGB)**: 在原始 RGB 图像上定义一个有效矩形区域 (`rgb_crop_*`)。
+3. **映射与缩放**: 系统将 LiDAR ROI 内的数据缩放，使其精确覆盖 RGB ROI 的区域。
+
+**代码实现**:
+```cpp
+// 1. 裁剪源 (LiDAR)
+cv::Mat map_cropped = map_transposed(src_roi);
+
+// 2. 裁剪目标 (RGB) - 输出图像尺寸等于此 ROI 尺寸
+cv::Mat final_image = rgb_image(tgt_roi).clone();
+
+// 3. 缩放源以匹配目标
+cv::Mat map_resized;
+cv::resize(map_cropped, map_resized, final_image.size());
+
+// 4. 融合与绘制
+// 所有的标签坐标也会经过同样的 Transform (Shift -> Scale -> Shift)
+```
+
+### 7.2 配置参数 (Configuration)
+
+新的融合参数位于 `config.yaml` 中：
+
+```yaml
+# RGB ROI Crops (定义 RGB 图片上的有效区域)
+rgb_crop_up: 700   # 顶部裁剪掉 700 像素 (例如去除无效背景)
+rgb_crop_down: 0
+rgb_crop_left: 0
+rgb_crop_right: 0
+
+# LiDAR ROI Crops (定义厚度图上的有效区域)
+# 调整这些值直到 LiDAR 图像的内容与 RGB 裁剪区域的内容完全对齐
+lidar_crop_up: 0
+lidar_crop_down: 0
+lidar_crop_left: 15 # 左侧裁剪掉 15 像素
+lidar_crop_right: 0
 ```
 

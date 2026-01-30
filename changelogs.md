@@ -1,3 +1,25 @@
+## 2026-01-30
+
+### 融合可视化增强 (Fusion Visualization Enhancement)
+- **双源 ROI 对齐 (Dual-Source ROI Alignment)**:
+  - 实现了基于 ROI (Region of Interest) 的对齐机制，允许分别为 RGB 图像和 LiDAR 厚度图定义裁剪区域 (`rgb_crop_*` 和 `lidar_crop_*`)。
+  - 通过定义两个来源的物理视场 (Field of View)，确保了不同分辨率和视角的传感器数据能够精确对齐。
+  - 最终以此裁剪后的 RGB 图像为底图，进行融合和标注。
+
+- **标签优化 (Labeling Optimization)**:
+  - 增加了标签字体的大小和粗细，以适应高分辨率 (4096x7200) 的输出图像。
+  - 标签坐标现在根据 ROI 裁剪和缩放自动转换，确保准确标注在矿石中心。
+  - The thickness values are normalized and injected into the Red channel (default) of the RGB image.
+
+- **配置重构 (Configuration Refactoring)**:
+  - 废弃了简单的 `fusion_x/y_offset`。
+  - 引入了 8 个独立的裁剪参数：
+    - `rgb_crop_up/down/left/right`: 定义 RGB 图像的有效区域。
+    - `lidar_crop_up/down/left/right`: 定义 LiDAR 厚度图的有效区域。
+
+### 构建修复 (Build Fixes)
+- **Release 构建**: 配置了 `windows-release` 预设，解决了 OpenCV 链接时的 `opencv_core_parallel_openmp` 缺失警告，确保了更快的运行速度。
+
 ## 2026-01-28
 
 ### 全局厚度图生成 (Global Thickness Map)
