@@ -103,8 +103,8 @@ int main() {
               << std::endl;
 
     // Side Panel Calibration and Filtering
-    // Known height = 17 cm = 0.17 m
-    float known_panel_height = 0.17f;
+    // Known height = 17 cm = 0.17 m = 170mm;
+    float known_panel_height = 170.0f;
     float new_scale = 1.0f;
 
     // Check config for behavior
@@ -173,15 +173,14 @@ int main() {
 
     for (auto &ore : ores) {
       analyzer.computeStats(ore, false);
-      // std::cout << "Ore " << ore.id << ": Avg Thickness = " <<
-      // ore.avg_thickness
-      //           << " (Max: " << ore.max_thickness << ")" << std::endl;
+      std::cout << "Ore " << ore.id << ": Avg Thickness = " << ore.avg_thickness
+                << " (Max: " << ore.max_thickness << ")" << std::endl;
     }
 
     // Generate and Save Global Thickness Map
     std::cout << "Generating Global Thickness Map..." << std::endl;
     // Resolution: 1cm per pixel (0.01m)
-    auto thickness_map = analyzer.generateGlobalThicknessMap(ores, 0.01f);
+    auto thickness_map = analyzer.generateGlobalThicknessMap(ores, unit_scale);
 
     std::string map_file =
         "E:/multi_source_info/lidar/pcd_data/thickness_map.png";
@@ -194,36 +193,86 @@ int main() {
       std::cerr << "Failed to save thickness map!" << std::endl;
     }
 
-    // FUSE Thickness with RGB Image
-    int fusion_channel = Config::get<int>(config, "fusion_channel", 2);
-    // Separate offsets
-    // RGB Crops
-    OreAnalyzer::FusionCrops rgb_crops;
-    rgb_crops.up = Config::get<int>(config, "rgb_crop_up", 0);
-    rgb_crops.down = Config::get<int>(config, "rgb_crop_down", 0);
-    rgb_crops.left = Config::get<int>(config, "rgb_crop_left", 0);
-    rgb_crops.right = Config::get<int>(config, "rgb_crop_right", 0);
+    // Fusion Logic
+    std::string fuse_mode = Config::get<std::string>(config, "fuse", "false");
+    // Normalize to lower case just in case
+    std::transform(fuse_mode.begin(), fuse_mode.end(), fuse_mode.begin(),
+                   ::tolower);
 
-    // LiDAR Crops
-    OreAnalyzer::FusionCrops lidar_crops;
-    lidar_crops.up = Config::get<int>(config, "lidar_crop_up", 0);
-    lidar_crops.down = Config::get<int>(config, "lidar_crop_down", 0);
-    lidar_crops.left = Config::get<int>(config, "lidar_crop_left", 0);
-    lidar_crops.right = Config::get<int>(config, "lidar_crop_right", 0);
+    if (fuse_mode == "rgb") {
+      int fusion_channel = Config::get<int>(config, "fusion_channel", 2);
+      // Separate offsets
+      // RGB Crops
+      OreAnalyzer::FusionCrops rgb_crops;
+      rgb_crops.up = Config::get<int>(config, "rgb_crop_up", 0);
+      rgb_crops.down = Config::get<int>(config, "rgb_crop_down", 0);
+      rgb_crops.left = Config::get<int>(config, "rgb_crop_left", 0);
+      rgb_crops.right = Config::get<int>(config, "rgb_crop_right", 0);
 
-    std::string rgb_path =
-        "E:/multi_source_info/lidar/pcd_data/stitched_ore.jpg";
-    std::string fused_path =
-        "E:/multi_source_info/lidar/pcd_data/fused_thickness.jpg";
+      // LiDAR Crops
+      OreAnalyzer::FusionCrops lidar_crops;
+      lidar_crops.up = Config::get<int>(config, "lidar_crop_up", 0);
+      lidar_crops.down = Config::get<int>(config, "lidar_crop_down", 0);
+      lidar_crops.left = Config::get<int>(config, "lidar_crop_left", 0);
+      lidar_crops.right = Config::get<int>(config, "lidar_crop_right", 0);
 
-    std::cout << "Fusing thickness map with RGB image..." << std::endl;
-    // Pass &ores for labeling on Fused Image
-    if (analyzer.fuseThicknessWithImage(thickness_map, rgb_path, fused_path,
-                                        fusion_channel, rgb_crops, lidar_crops,
-                                        &ores)) {
-      std::cout << "Fused image saved to: " << fused_path << std::endl;
+      std::string rgb_path =
+          "E:/multi_source_info/lidar/pcd_data/stitched_ore.jpg";
+      std::string fused_path =
+          "E:/multi_source_info/lidar/pcd_data/fused_thickness.jpg";
+
+      std::cout << "Fusing thickness map with RGB image..." << std::endl;
+      // Pass &ores for labeling on Fused Image
+      if (analyzer.fuseThicknessWithImage(thickness_map, rgb_path, fused_path,
+                                          fusion_channel, rgb_crops,
+                                          lidar_crops, &ores)) {
+        std::cout << "Fused image saved to: " << fused_path << std::endl;
+      } else {
+        std::cerr << "Failed to fuse thickness map with RGB image."
+                  << std::endl;
+      }
+    } else if (fuse_mode == "xray") {
+      std::string xray_path = Config::get<std::string>(config, "xray_path", "");
+
+      if (!xray_path.empty()) {
+        int xray_cut_left = Config::get<int>(config, "xray_cut_left", 0);
+        int xray_cut_right = Config::get<int>(config, "xray_cut_right", 0);
+
+        // X-ray ROI Crops
+        OreAnalyzer::FusionCrops xray_crops;
+        xray_crops.up = Config::get<int>(config, "xray_crop_up", 0);
+        xray_crops.down = Config::get<int>(config, "xray_crop_down", 0);
+        xray_crops.left = Config::get<int>(config, "xray_crop_left", 0);
+        xray_crops.right = Config::get<int>(config, "xray_crop_right", 0);
+
+        // Retrieve LiDAR crops again (or reuse if they were in scope, but they
+        // were inside if(fuse_enabled))
+        OreAnalyzer::FusionCrops lidar_crops;
+        lidar_crops.up = Config::get<int>(config, "lidar_crop_up", 0);
+        lidar_crops.down = Config::get<int>(config, "lidar_crop_down", 0);
+        lidar_crops.left = Config::get<int>(config, "lidar_crop_left", 0);
+        lidar_crops.right = Config::get<int>(config, "lidar_crop_right", 0);
+
+        std::string fused_xray_path =
+            "E:/multi_source_info/lidar/pcd_data/fused_thickness_xray.jpg";
+
+        std::cout << "Fusing thickness map with X-ray image (" << xray_path
+                  << ")..." << std::endl;
+        if (analyzer.fuseThicknessWithXray(
+                thickness_map, xray_path, fused_xray_path, xray_cut_left,
+                xray_cut_right, xray_crops, lidar_crops, &ores)) {
+          std::cout << "Fused X-ray image saved to: " << fused_xray_path
+                    << std::endl;
+        } else {
+          std::cerr << "Failed to fuse thickness map with X-ray image."
+                    << std::endl;
+        }
+      } else {
+        std::cerr << "Error: X-ray path is empty but fuse mode is 'xray'."
+                  << std::endl;
+      }
     } else {
-      std::cerr << "Failed to fuse thickness map with RGB image." << std::endl;
+      std::cout << "Fusion disabled (mode: " << fuse_mode << ")." << std::endl;
     }
 
     cloud = analyzer.getAlignedCloud();

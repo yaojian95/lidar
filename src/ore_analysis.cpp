@@ -1118,3 +1118,187 @@ bool OreAnalyzer::fuseThicknessWithImage(const ThicknessMap &map,
     return false;
   }
 }
+
+bool OreAnalyzer::fuseThicknessWithXray(const ThicknessMap &map,
+                                        const std::string &xray_filename,
+                                        const std::string &output_filename,
+                                        int cut_left, int cut_right,
+                                        FusionCrops xray_crops,
+                                        FusionCrops lidar_crops,
+                                        const std::vector<Ore> *ores) {
+  if (map.data.empty() || map.width <= 0 || map.height <= 0) {
+    std::cerr << "Error: Thickness map is empty." << std::endl;
+    return false;
+  }
+
+  // 1. Load X-ray Image (Grayscale)
+  cv::Mat xray_image = cv::imread(xray_filename, cv::IMREAD_GRAYSCALE);
+  if (xray_image.empty()) {
+    std::cerr << "Error: Could not read X-ray image from " << xray_filename
+              << std::endl;
+    return false;
+  }
+
+  std::cout << "Loaded X-ray Image: " << xray_image.cols << "x"
+            << xray_image.rows << std::endl;
+
+  // 2. Split (Left = Low Energy)
+  int mid = xray_image.cols / 2;
+  // Ensure mid is valid
+  if (mid <= 0)
+    return false;
+  cv::Mat low_energy = xray_image(cv::Rect(0, 0, mid, xray_image.rows));
+
+  // 3. Crop Low Energy
+  int new_width = mid - cut_left - cut_right;
+  if (new_width <= 0) {
+    std::cerr << "Error: X-ray cuts define invalid width (" << new_width << ")."
+              << std::endl;
+    return false;
+  }
+  // Validate cuts
+  if (cut_left < 0 || cut_right < 0 || cut_left + cut_right >= mid) {
+    std::cerr << "Error: Invalid X-ray cuts." << std::endl;
+    return false;
+  }
+
+  cv::Mat sliced_low =
+      low_energy(cv::Rect(cut_left, 0, new_width, low_energy.rows));
+
+  // 3b. Apply X-ray ROI Crops
+  // xray_crops are applied relative to the sliced_low image
+  int crop_width = sliced_low.cols - xray_crops.left - xray_crops.right;
+  int crop_height = sliced_low.rows - xray_crops.up - xray_crops.down;
+
+  if (crop_width <= 0 || crop_height <= 0) {
+    std::cerr << "Error: X-ray ROI crops result in empty image." << std::endl;
+    return false;
+  }
+
+  // Validate bounds
+  if (xray_crops.left < 0 || xray_crops.up < 0 ||
+      xray_crops.left + crop_width > sliced_low.cols ||
+      xray_crops.up + crop_height > sliced_low.rows) {
+    std::cerr << "Error: Invalid X-ray ROI crops." << std::endl;
+    return false;
+  }
+
+  cv::Mat cropped_xray = sliced_low(
+      cv::Rect(xray_crops.left, xray_crops.up, crop_width, crop_height));
+
+  // Clone to ensure contiguous memory and for conversion
+  cv::Mat final_image_gray = cropped_xray.clone();
+  cv::Mat final_image;
+  cv::cvtColor(final_image_gray, final_image, cv::COLOR_GRAY2BGR);
+
+  // 4. Prepare Thickness Map
+  cv::Mat map_mat(map.height, map.width, CV_32FC1);
+  float max_v = 0.0f;
+  for (int r = 0; r < map.height; ++r) {
+    for (int c = 0; c < map.width; ++c) {
+      float val = map.data[r * map.width + c];
+      if (val > max_v)
+        max_v = val;
+      map_mat.at<float>(r, c) = val;
+    }
+  }
+
+  if (max_v <= 0.000001f)
+    max_v = 1.0f;
+
+  // Transpose to match the saved image orientation
+  cv::Mat map_transposed;
+  cv::transpose(map_mat, map_transposed);
+
+  // 5. Crop LiDAR Map (Source ROI)
+  cv::Rect src_roi(lidar_crops.left, lidar_crops.up,
+                   map_transposed.cols - lidar_crops.left - lidar_crops.right,
+                   map_transposed.rows - lidar_crops.up - lidar_crops.down);
+
+  // Validate ROI
+  if (src_roi.width <= 0 || src_roi.height <= 0 || src_roi.x < 0 ||
+      src_roi.y < 0 || src_roi.x + src_roi.width > map_transposed.cols ||
+      src_roi.y + src_roi.height > map_transposed.rows) {
+    std::cerr << "Error: Invalid LiDAR crops for X-ray fusion." << std::endl;
+    return false;
+  }
+
+  cv::Mat map_cropped = map_transposed(src_roi);
+
+  // 6. Resize Map to Fit Sliced X-ray
+  // We assume the mapped area corresponds to the visible X-ray area after cuts.
+  cv::Mat map_resized;
+  cv::resize(map_cropped, map_resized, final_image.size(), 0, 0,
+             cv::INTER_LINEAR);
+
+  // 7. Overlay
+  // We'll increment the Red channel (channel 2) or use a heatmap?
+  // User asked to fuse. Simple addition to Red is effective.
+  for (int r = 0; r < map_resized.rows; ++r) {
+    for (int c = 0; c < map_resized.cols; ++c) {
+      float val = map_resized.at<float>(r, c);
+      if (val <= 0.001f)
+        continue;
+
+      float norm_val = (val / max_v) * 255.0f;
+      if (norm_val > 255.0f)
+        norm_val = 255.0f;
+
+      // Add to Red channel
+      int current_red = final_image.at<cv::Vec3b>(r, c)[2];
+      int new_red = current_red + static_cast<int>(norm_val);
+      if (new_red > 255)
+        new_red = 255;
+      final_image.at<cv::Vec3b>(r, c)[2] = static_cast<uint8_t>(new_red);
+    }
+  }
+
+  // 8. Draw Labels
+  if (ores) {
+    float scale_x = static_cast<float>(final_image.cols) / map_cropped.cols;
+    float scale_y = static_cast<float>(final_image.rows) / map_cropped.rows;
+    float resolution_raw = map.resolution / unit_scale_;
+    if (unit_scale_ <= 1e-6f)
+      resolution_raw = 1.0f;
+
+    for (const auto &ore : *ores) {
+      if (!ore.point_indices || ore.point_indices->indices.empty())
+        continue;
+
+      float cx = (ore.min_x + ore.max_x) / 2.0f;
+      float cy = (ore.min_y + ore.max_y) / 2.0f;
+
+      int col_map = static_cast<int>((cx - map.min_x) / resolution_raw);
+      int row_map = static_cast<int>((map.max_y - cy) / resolution_raw);
+
+      // Transposed
+      int r_trans = col_map;
+      int c_trans = row_map;
+
+      // Crop
+      int r_cropped = r_trans - src_roi.y;
+      int c_cropped = c_trans - src_roi.x;
+
+      // Scale
+      int r_scaled = static_cast<int>(r_cropped * scale_y);
+      int c_scaled = static_cast<int>(c_cropped * scale_x);
+
+      int rgb_r = r_scaled;
+      int rgb_c = c_scaled;
+
+      if (rgb_r >= 0 && rgb_r < final_image.rows && rgb_c >= 0 &&
+          rgb_c < final_image.cols) {
+        std::string label = ore.id;
+        if (label.find("ore_") == 0)
+          label = label.substr(4);
+
+        // Use Green for text to contrast with Red thickness
+        cv::putText(final_image, label, cv::Point(rgb_c, rgb_r),
+                    cv::FONT_HERSHEY_SIMPLEX, 3.0, cv::Scalar(0, 255, 0), 4);
+      }
+    }
+  }
+
+  std::cout << "Saving X-ray Fusion to " << output_filename << std::endl;
+  return cv::imwrite(output_filename, final_image);
+}

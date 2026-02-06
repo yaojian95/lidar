@@ -1,3 +1,31 @@
+## 2026-02-06 (Update 2)
+
+### X-ray 融合功能 (X-ray Fusion)
+- **新功能**: 实现了 `fuseThicknessWithXray` 函数，用于将 LiDAR 厚度图与 X 光透射图像（低能部分）进行融合。
+- **流程**:
+  - 读取单通道 X 光灰度图像。
+  - 将图像分为左（低能）右（高能）两半。
+  - 根据 `xray_cut_left` 和 `xray_cut_right` 对低能图像进行初步裁剪（去除边缘）。
+  - **New**: 应用 `xray_crop_*` 参数对裁剪后的图像进行 ROI 选择，去除无关背景。
+  - 将厚度图调整为最终裁剪后的 X 光图像大小，并将其叠加到红色通道中。
+- **配置更新**:
+  - 新增 `xray_path` 指定输入的 X 光图像路径。
+  - 新增 `xray_cut_left` 和 `xray_cut_right` 定义低能图像的有效区域。
+  - **New**: 新增 `xray_crop_up/down/left/right`，实现对 X 光低能图像的精细 ROI 控制。
+  - **Refactor**: 将 `fuse_rgb` 和 `fuse_xray` 合并为单个 `fuse` 参数，可选值为 `"rgb"`, `"xray"`, 或 `"false"`。
+
+## 2026-02-06
+
+### 工具更新 (Tools Update)
+- **新增 PLY 裁剪工具**: 创建 `py_src/crop_ply_x.py`。
+  - 功能：读取 PLY 文件，去除 X 轴方向前 1/3 和后 1/3 的数据，仅保留中间 1/3。
+  - 用法：`python py_src/crop_ply_x.py <input_file>`
+- **输出格式调整**: `stack_tif_files` 输出文件格式由 `.tif` 更改为 `.png`。
+- **配置更新**: 在 `config.yaml` 中新增 `fuse` 参数，用于控制是否执行厚度图与 RGB 图像的融合。
+- **新增 TIF 堆叠功能**: 在 `py_src/simple_stack.py` 中添加了 `stack_tif_files` 函数。
+  - 功能：支持读取指定文件夹下的所有 `.tif` 文件，并将其按垂直方向拼接。
+  - 输出：拼接后的图像以文件夹命名，保存在该文件夹的上一级目录中。
+
 ## 2026-01-30
 
 ### 融合可视化增强 (Fusion Visualization Enhancement)

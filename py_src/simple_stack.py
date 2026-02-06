@@ -2,6 +2,7 @@ import open3d as o3d
 import numpy as np
 import glob
 import os
+import cv2
 
 def simple_stitch_ore_pcd(pcd_folder, output_path="stitched_ore.ply"):
     """简化版矿石点云拼接"""
@@ -48,6 +49,66 @@ def simple_stitch_ore_pcd(pcd_folder, output_path="stitched_ore.ply"):
     
     return combined_pcd
 
+def stack_tif_files(image_folder, axis=0):
+    """
+    将指定文件夹内的所有tif文件堆叠/拼接成一张大图
+    :param image_folder: tif文件所在的文件夹路径
+    :param axis: 拼接方向，0为垂直拼接(vstack)，1为水平拼接(hstack)
+    """
+    if not os.path.exists(image_folder):
+        print(f"Error: Folder not found: {image_folder}")
+        return
+
+    # 1. 获取所有tif文件
+    search_pattern = os.path.join(image_folder, "*.tif")
+    tif_files = sorted(glob.glob(search_pattern))
+    
+    if not tif_files:
+        print(f"Warning: No .tif files found in {image_folder}")
+        return
+
+    print(f"Found {len(tif_files)} tif files in {image_folder}")
+
+    # 2. 读取所有图片
+    images = []
+    for f in tif_files:
+        # cv2.IMREAD_UNCHANGED ensures we keep 16-bit or other depths if present
+        img = cv2.imread(f, cv2.IMREAD_UNCHANGED)
+        if img is not None:
+            images.append(img)
+        else:
+            print(f"Warning: Failed to read {f}")
+
+    if not images:
+        print("No valid images to stack.")
+        return
+
+    # 3. 拼接图片
+    try:
+        # axis=0: vertical stack (height increases)
+        # axis=1: horizontal stack (width increases)
+        stacked_image = np.concatenate(images, axis=axis)
+        
+        # 4. 生成输出路径
+        # 所在文件夹的上一层
+        folder_abs = os.path.abspath(image_folder)
+        parent_dir = os.path.dirname(folder_abs)
+        folder_name = os.path.basename(folder_abs)
+        
+        output_filename = f"{folder_name}.png"
+        output_path = os.path.join(parent_dir, output_filename)
+        
+        # 5. 保存
+        cv2.imwrite(output_path, stacked_image)
+        print(f"Stacked image saved to: {output_path} (Shape: {stacked_image.shape})")
+        
+    except ValueError as e:
+        print(f"Error during stacking (check image dimensions match): {e}")
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+
 # 使用示例
 if __name__ == "__main__":
-    simple_stitch_ore_pcd("data/ore_belt", "simple_stitched.ply")
+    # simple_stitch_ore_pcd("data/ore_belt", "simple_stitched.ply")
+    stack_tif_files(r"E:\multi_source_info\lidar\pcd_data\20260205\xray_0p5ms-1", axis=0)
+    # pass

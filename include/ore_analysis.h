@@ -161,4 +161,14 @@ public:
                               const std::string &output_filename, int channel,
                               FusionCrops rgb_crops, FusionCrops lidar_crops,
                               const std::vector<Ore> *ores = nullptr);
+
+  // Fuse Thickness Map with Sliced Low-Energy X-ray Image
+  // Input: Single channel Grayscale (Left=Low, Right=High)
+  // Cuts apply to the Left (Low Energy) half.
+  bool fuseThicknessWithXray(const ThicknessMap &map,
+                             const std::string &xray_filename,
+                             const std::string &output_filename, int cut_left,
+                             int cut_right, FusionCrops xray_crops,
+                             FusionCrops lidar_crops,
+                             const std::vector<Ore> *ores = nullptr);
 };

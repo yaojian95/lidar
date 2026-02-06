@@ -981,7 +981,34 @@ cv::imwrite(filename, transposed_image);
 
 ---
 
-## 7. 融合与可视化 (Fusion & Visualization)
+### 7. 融合与可视化 (Fusion & Visualization)
+
+**全局配置**:
+- **参数**: `fuse` (在 `config.yaml` 中设置)
+- **可选值**: `"rgb"`, `"xray"`, `"false"` (不区分大小写)
+
+### RGB 融合
+- **模式**: `fuse: "rgb"`
+- **输入**: RGB 图像 (`stitched_ore.jpg`)
+- **流程**:
+    1. 读取 RGB 图像。
+    2. 根据 `rgb_crop_*` 和 `lidar_crop_*` 参数对齐两个来源的 ROI。
+    3. 将 LiDAR 厚度图投影到 RGB 图像上。
+    4. 将厚度值归一化并写入红色通道 (Channel 2)。
+    5. 在矿石位置标注 ID。
+    6. 保存结果为 `fused_thickness.jpg`。
+
+### X-ray 融合
+- **模式**: `fuse: "xray"`
+- **输入**: X 射线图像 (单通道灰度)
+- **输入**: X 射线图像 (单通道灰度)
+- **流程**:
+    1. 读取 X 射线图像。
+    2. 分割为左右两半（左=低能，右=高能）。
+    3. 根据 `xray_cut_*` 参数裁剪低能图像边缘。
+    4. 根据 `xray_crop_*` 参数进一步选择 ROI。
+    5. 将 LiDAR 厚度图调整大小并叠加到 X 射线图像的红色通道。
+    6. 保存结果为 `fused_thickness_xray.jpg`。
 
 ### 7.1 双源 ROI 对齐 (Dual-Source ROI Alignment)
 
