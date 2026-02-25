@@ -1000,11 +1000,23 @@ cv::imwrite(filename, transposed_image);
 
 ### X-ray 融合
 - **模式**: `fuse: "xray"`
-- **输入**: X 射线图像 (单通道灰度)
+
+### X-ray 几何校正 (Geometry Correction)
+- **输入**: 原始 X 射线探测器图像 (单通道灰度)
+- **参数控制**: 受 `config.yaml` 中的布尔值开关 `enable_xray_geometry_correction` 控制。
+- **功能**: 由于点光源的成像原理，X 射线线阵探测器上的图像放大率为 `M = sdd / sod` (sdd = 光源到探测器距离, sod = 光源到物体距离)。同时，由于皮带在运动，沿皮带方向（高度/Y轴）并不会产生因为点光源带来的额外畸变扩散，因此我们只在跨皮带方向（宽度/X轴）按比例缩小图像尺寸 (`1/M`)，以将探测器上的图像还原为物体所在平面的真实物理尺寸。
+- **公共接口**: 该功能已被分离提炼至通用的 `Utils::correctXrayGeometry(cv::Mat& input, cv::Mat& output, sod, sdd)` 接口，方便任何拥有 OpenCV 矩阵的模块直接在内存中执行校正。
+- **集成**: 在主程序中读取 `config.yaml` 里的参数，随后直接在融合模块对截取后的内存图像区块应用上述 `Utils` 接口。
+- **使用示例**:
+```cpp
+// sod = 40mm, sdd = 60mm
+Utils::correctXrayGeometry(input_mat, output_mat, 40.0f, 60.0f);
+```
 - **输入**: X 射线图像 (单通道灰度)
 - **流程**:
-    1. 读取 X 射线图像。
-    2. 分割为左右两半（左=低能，右=高能）。
+    1. 前置步骤：检查并应用 `correctXrayGeometry` 对原始图像进行几何校正（依赖 `xray_sod` 和 `xray_sdd`）。
+    2. 读取校正后的 X 射线图像。
+    3. 分割为左右两半（左=低能，右=高能）。
     3. 根据 `xray_cut_*` 参数裁剪低能图像边缘。
     4. 根据 `xray_crop_*` 参数进一步选择 ROI。
     5. 将 LiDAR 厚度图调整大小并叠加到 X 射线图像的红色通道。

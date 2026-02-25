@@ -1,6 +1,7 @@
 #include "utils.h"
 #include <fstream>
 #include <iostream>
+#include <opencv2/opencv.hpp>
 
 YAML::Node Config::load(const std::string &config_file) {
   try {
@@ -107,13 +108,14 @@ void saveConfigWithComments(const std::string &config_file,
       // Replace with new value from config
       if (config[key]) {
         // Special handling for comments if present?
-        // Simple approach: Replace the value part, keep the comment if we can parse it.
-        // But current logic completely replaces the line: line = indent + key + ": " + value
-        // This DESTROYS comments on the same line.
+        // Simple approach: Replace the value part, keep the comment if we can
+        // parse it. But current logic completely replaces the line: line =
+        // indent + key + ": " + value This DESTROYS comments on the same line.
         // The user specifically asked for comments to be preserved.
         // My previous edit to config.yaml added a comment to unit_scale line.
-        // The current implementation of saveConfigWithComments overwrites the whole line.
-        
+        // The current implementation of saveConfigWithComments overwrites the
+        // whole line.
+
         // Let's try to preserve the comment if it exists on the line.
         std::string original_comment = "";
         size_t comment_pos = line.find("#");
@@ -123,7 +125,7 @@ void saveConfigWithComments(const std::string &config_file,
 
         line = indent + key + ": " + std::to_string(config[key].as<float>());
         if (!original_comment.empty()) {
-           line += " " + original_comment;
+          line += " " + original_comment;
         }
       }
     }
@@ -214,3 +216,33 @@ void saveConfigWithComments(const std::string &config_file,
   }
   outfile.close();
 }
+
+namespace Utils {
+bool correctXrayGeometry(const cv::Mat &input_image, cv::Mat &output_image,
+                         float sod, float sdd) {
+  if (sod <= 0.0f || sdd <= 0.0f) {
+    std::cerr << "Error: SOD and SDD must be positive values." << std::endl;
+    return false;
+  }
+  if (input_image.empty()) {
+    std::cerr << "Error: Input image is empty." << std::endl;
+    return false;
+  }
+
+  float magnification = sdd / sod;
+  if (magnification <= 0.001f) {
+    std::cerr << "Error: Invalid magnification calculated (" << magnification
+              << ")." << std::endl;
+    return false;
+  }
+
+  // The X-ray sequence only has distortion in the cross-belt direction (X-axis,
+  // width).
+  double scale_factor_x = 1.0 / static_cast<double>(magnification);
+  double scale_factor_y = 1.0;
+  cv::resize(input_image, output_image, cv::Size(), scale_factor_x,
+             scale_factor_y, cv::INTER_LINEAR);
+
+  return true;
+}
+} // namespace Utils

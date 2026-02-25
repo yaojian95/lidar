@@ -1,6 +1,7 @@
 #pragma once
 
 #include <iostream>
+#include <opencv2/opencv.hpp>
 #include <pcl/PointIndices.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -165,10 +166,12 @@ public:
   // Fuse Thickness Map with Sliced Low-Energy X-ray Image
   // Input: Single channel Grayscale (Left=Low, Right=High)
   // Cuts apply to the Left (Low Energy) half.
+  // Performs geometry correction (sdd/sod scaling on X-axis) after cutting.
   bool fuseThicknessWithXray(const ThicknessMap &map,
                              const std::string &xray_filename,
                              const std::string &output_filename, int cut_left,
-                             int cut_right, FusionCrops xray_crops,
+                             int cut_right, bool enable_geometry_correction,
+                             float sod, float sdd, FusionCrops xray_crops,
                              FusionCrops lidar_crops,
                              const std::vector<Ore> *ores = nullptr);
 };

@@ -1,4 +1,5 @@
 #include "ore_analysis.h"
+#include "utils.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -9,6 +10,7 @@
 #include <pcl/filters/extract_indices.h>
 #include <pcl/segmentation/extract_clusters.h>
 #include <pcl/segmentation/sac_segmentation.h>
+
 
 OreAnalyzer::OreAnalyzer()
     : original_cloud_(new PointCloud), aligned_cloud_(new PointCloud) {}
@@ -1119,13 +1121,12 @@ bool OreAnalyzer::fuseThicknessWithImage(const ThicknessMap &map,
   }
 }
 
-bool OreAnalyzer::fuseThicknessWithXray(const ThicknessMap &map,
-                                        const std::string &xray_filename,
-                                        const std::string &output_filename,
-                                        int cut_left, int cut_right,
-                                        FusionCrops xray_crops,
-                                        FusionCrops lidar_crops,
-                                        const std::vector<Ore> *ores) {
+bool OreAnalyzer::fuseThicknessWithXray(
+    const ThicknessMap &map, const std::string &xray_filename,
+    const std::string &output_filename, int cut_left, int cut_right,
+    bool enable_geometry_correction, float sod, float sdd,
+    FusionCrops xray_crops, FusionCrops lidar_crops,
+    const std::vector<Ore> *ores) {
   if (map.data.empty() || map.width <= 0 || map.height <= 0) {
     std::cerr << "Error: Thickness map is empty." << std::endl;
     return false;
@@ -1148,6 +1149,9 @@ bool OreAnalyzer::fuseThicknessWithXray(const ThicknessMap &map,
   if (mid <= 0)
     return false;
   cv::Mat low_energy = xray_image(cv::Rect(0, 0, mid, xray_image.rows));
+
+  // Flip horizontally as requested (original is mirrored)
+  cv::flip(low_energy, low_energy, 1);
 
   // 3. Crop Low Energy
   int new_width = mid - cut_left - cut_right;
@@ -1186,8 +1190,30 @@ bool OreAnalyzer::fuseThicknessWithXray(const ThicknessMap &map,
   cv::Mat cropped_xray = sliced_low(
       cv::Rect(xray_crops.left, xray_crops.up, crop_width, crop_height));
 
+  // --- 3c. Apply Geometry Correction AFTER cropping ---
+  cv::Mat corrected_xray;
+  if (enable_geometry_correction && sod > 0.0f && sdd > 0.0f) {
+    if (Utils::correctXrayGeometry(cropped_xray, corrected_xray, sod, sdd)) {
+      std::cout << "Applied X-ray Geometry Correction (after crop)."
+                << std::endl;
+      std::cout << "  SOD: " << sod << " mm, SDD: " << sdd
+                << " mm, M: " << (sdd / sod) << std::endl;
+      std::cout << "  Corrected ROI size: " << corrected_xray.cols << "x"
+                << corrected_xray.rows << std::endl;
+    } else {
+      std::cout << "Skipping X-ray Geometry Correction: Execution failed."
+                << std::endl;
+      corrected_xray = cropped_xray;
+    }
+  } else {
+    std::cout << "Skipping X-ray Geometry Correction (disabled in config or "
+                 "invalid parameters)."
+              << std::endl;
+    corrected_xray = cropped_xray;
+  }
+
   // Clone to ensure contiguous memory and for conversion
-  cv::Mat final_image_gray = cropped_xray.clone();
+  cv::Mat final_image_gray = corrected_xray.clone();
   cv::Mat final_image;
   cv::cvtColor(final_image_gray, final_image, cv::COLOR_GRAY2BGR);
 
@@ -1294,7 +1320,7 @@ bool OreAnalyzer::fuseThicknessWithXray(const ThicknessMap &map,
 
         // Use Green for text to contrast with Red thickness
         cv::putText(final_image, label, cv::Point(rgb_c, rgb_r),
-                    cv::FONT_HERSHEY_SIMPLEX, 3.0, cv::Scalar(0, 255, 0), 4);
+                    cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(255, 0, 0), 2);
       }
     }
   }

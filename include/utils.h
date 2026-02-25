@@ -1,6 +1,16 @@
 #pragma once
+#include <opencv2/opencv.hpp>
 #include <string>
 #include <yaml-cpp/yaml.h>
+
+
+namespace Utils {
+// In-memory X-ray Geometry Correction
+// Scales only the cross-belt direction (X-axis/width) by 1/M.
+// M = sdd / sod.
+bool correctXrayGeometry(const cv::Mat &input_image, cv::Mat &output_image,
+                         float sod = 20.0f, float sdd = 60.0f);
+} // namespace Utils
 
 // Config helper class
 class Config {

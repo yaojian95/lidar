@@ -235,6 +235,11 @@ int main() {
       std::string xray_path = Config::get<std::string>(config, "xray_path", "");
 
       if (!xray_path.empty()) {
+        bool enable_geometry =
+            Config::get<bool>(config, "enable_xray_geometry_correction", true);
+        float sod = Config::get<float>(config, "xray_sod", 20.0f);
+        float sdd = Config::get<float>(config, "xray_sdd", 60.0f);
+
         int xray_cut_left = Config::get<int>(config, "xray_cut_left", 0);
         int xray_cut_right = Config::get<int>(config, "xray_cut_right", 0);
 
@@ -260,7 +265,8 @@ int main() {
                   << ")..." << std::endl;
         if (analyzer.fuseThicknessWithXray(
                 thickness_map, xray_path, fused_xray_path, xray_cut_left,
-                xray_cut_right, xray_crops, lidar_crops, &ores)) {
+                xray_cut_right, enable_geometry, sod, sdd, xray_crops,
+                lidar_crops, &ores)) {
           std::cout << "Fused X-ray image saved to: " << fused_xray_path
                     << std::endl;
         } else {

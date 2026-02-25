@@ -27,15 +27,23 @@ max_cluster_size: 50000 # Maximum number of points to form an ore chunk
 
 # Fusion Options
 fuse: "xray"            # Options: "rgb", "xray", "false"
-fusion_channel: 2      # 0=Blue, 1=Green, 2=Red
+fusion_channel: 2      # 0: Blue, 1: Green, 2: Red
 
-# X-ray Fusion Options
+# X-ray Parameters
 xray_path: "E:/multi_source_info/lidar/pcd_data/20260205/xray_0p5ms-1.png"
-xray_cut_left: 100
-xray_cut_right: 100
+
+# X-ray Geometric Correction
+enable_xray_geometry_correction: true
+# M = sdd / sod. The image will be shrunk by 1/M.
+xray_sod: 40.0
+xray_sdd: 60.0
+
+# X-ray Crop Parameters (For fusion mode: xray)
+xray_cut_left: 50
+xray_cut_right: 120
 # X-ray ROI Crops (Applied after the cuts above)
-xray_crop_up: 0
-xray_crop_down: 0
+xray_crop_up: 330
+xray_crop_down: 270
 xray_crop_left: 0
 xray_crop_right: 0
 
@@ -55,4 +63,4 @@ lidar_crop_left: 15
 lidar_crop_right: 0
 
 # Visualization
-enable_visualization: true # Enable/Disable PCL visualization window
+enable_visualization: false # Enable/Disable PCL visualization window
