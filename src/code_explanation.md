@@ -143,18 +143,13 @@ static T get(const YAML::Node& config, const std::string& key, const T& default_
 }
 ```
 
-**使用示例**:
+**新增结构: `AppConfig` 及解析方法**
 ```cpp
-YAML::Node config = Config::load("config.yaml");
-std::string path = Config::get<std::string>(config, "pcd_path", "");
-float scale = Config::get<float>(config, "unit_scale", 1.0f);
-bool flag = Config::get<bool>(config, "visual_plane", true);
+struct AppConfig { ... };
+static AppConfig parseAppConfig(const YAML::Node &config);
 ```
 
-**优点**:
-- 类型安全（编译时检查）
-- 自动类型转换
-- 简洁的 API
+**功能**: 将原先散落在 `main.cpp` 各处的 `Config::get<T>` 统一汇聚到一处，返回一个包含所有参数强类型成员的结构体 `AppConfig`，供主程序直接调用。
 
 ---
 

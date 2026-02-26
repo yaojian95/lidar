@@ -25,6 +25,57 @@ void Config::save(const std::string &config_file, const YAML::Node &config) {
   }
 }
 
+AppConfig Config::parseAppConfig(const YAML::Node &config) {
+  AppConfig app;
+  if (!config)
+    return app;
+
+  app.pcd_path = get<std::string>(config, "pcd_path", "");
+  app.unit_scale = get<float>(config, "unit_scale", 1.0f);
+  app.save_plane = get<bool>(config, "save_plane_equation", false);
+  app.visual_plane = get<bool>(config, "visual_plane", true);
+  app.enable_visualization = get<bool>(config, "enable_visualization", true);
+
+  app.ground_threshold = get<float>(config, "ground_threshold", 0.02f);
+  app.ground_filter_sigma = get<float>(config, "ground_filter_sigma", 6.0f);
+  app.ground_filter_margin = get<float>(config, "ground_filter_margin", 1.0f);
+  app.fit_belt_edges = get<bool>(config, "fit_belt_edges", false);
+  app.belt_min_y = get<float>(config, "belt_min_y", -1e9f);
+  app.belt_max_y = get<float>(config, "belt_max_y", 1e9f);
+
+  app.cluster_tolerance = get<float>(config, "cluster_tolerance", 0.05f);
+  app.min_cluster_size = get<int>(config, "min_cluster_size", 50);
+  app.max_cluster_size = get<int>(config, "max_cluster_size", 50000);
+
+  app.fuse_mode = get<std::string>(config, "fuse", "false");
+  app.fusion_channel = get<int>(config, "fusion_channel", 2);
+
+  app.rgb_crop_up = get<int>(config, "rgb_crop_up", 0);
+  app.rgb_crop_down = get<int>(config, "rgb_crop_down", 0);
+  app.rgb_crop_left = get<int>(config, "rgb_crop_left", 0);
+  app.rgb_crop_right = get<int>(config, "rgb_crop_right", 0);
+
+  app.lidar_crop_up = get<int>(config, "lidar_crop_up", 0);
+  app.lidar_crop_down = get<int>(config, "lidar_crop_down", 0);
+  app.lidar_crop_left = get<int>(config, "lidar_crop_left", 0);
+  app.lidar_crop_right = get<int>(config, "lidar_crop_right", 0);
+
+  app.xray_path = get<std::string>(config, "xray_path", "");
+  app.enable_xray_geometry_correction =
+      get<bool>(config, "enable_xray_geometry_correction", true);
+  app.xray_sod = get<float>(config, "xray_sod", 20.0f);
+  app.xray_sdd = get<float>(config, "xray_sdd", 60.0f);
+  app.xray_cut_left = get<int>(config, "xray_cut_left", 0);
+  app.xray_cut_right = get<int>(config, "xray_cut_right", 0);
+
+  app.xray_crop_up = get<int>(config, "xray_crop_up", 0);
+  app.xray_crop_down = get<int>(config, "xray_crop_down", 0);
+  app.xray_crop_left = get<int>(config, "xray_crop_left", 0);
+  app.xray_crop_right = get<int>(config, "xray_crop_right", 0);
+
+  return app;
+}
+
 PlaneCoefficients PlaneCoefficients::fromConfig(const YAML::Node &config) {
   PlaneCoefficients plane;
 

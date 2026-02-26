@@ -11,7 +11,7 @@ find_package(yaml-cpp CONFIG REQUIRED)
 set(OpenCV_DIR "D:/opencv/opencv/build/")
 find_package(OpenCV REQUIRED)
 
-add_executable(pcl_demo src/main.cpp src/utils.cpp src/ore_analysis.cpp)
+add_executable(pcl_demo src/main.cpp src/utils.cpp src/ore_analysis.cpp src/app_pipeline.cpp)
 target_link_libraries(pcl_demo PRIVATE ${PCL_LIBRARIES} ${OpenCV_LIBS})
 target_link_libraries(pcl_demo PRIVATE yaml-cpp)
 target_include_directories(pcl_demo PRIVATE ${PCL_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} include)

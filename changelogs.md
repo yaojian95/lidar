@@ -1,5 +1,22 @@
-## 2026-02-24
+## 2026-02-26
 
+### Pipeline Extraction
+- **Extracted Pipeline Methods**: Created a new dedicated module `app_pipeline.h` and `src/app_pipeline.cpp`. All static helper functions (`loadPointCloud`, `processCalibrationAndGround`, `executeDetectionAndFusion`, `visualizeResults`) that were clogging up `main.cpp` have been moved here under the `AppPipeline` namespace.
+- **Clean Entrypoint**: `main.cpp` now only contains `#include` headers and a clean 50-line `int main()` orchestrator, which drastically improves clarity and organization.
+- **Compilation Update**: Added `src/app_pipeline.cpp` to `CMakeLists.txt`'s `add_executable` list.
+
+### Configuration Centralization & `main.cpp` Modularization
+- **Added `AppConfig` Struct**: Created `AppConfig` inside `utils.h` to strongly type and centralize all configuration variables read from `config.yaml`.
+- **Refactored Config Access**: Moved the extensive `Config::get<T>` extraction logic from `main.cpp` into a dedicated `Config::parseAppConfig` method inside `utils.cpp`. 
+- **Modularized `main.cpp` Workflow**: Split the massive 400-line `main()` function into four clear logical steps:
+  - `loadPointCloud(...)`
+  - `processCalibrationAndGround(...)`
+  - `executeDetectionAndFusion(...)`
+  - `visualizeResults(...)`
+  
+  This makes the main pipeline function short, directory-style, and highly readable without affecting functionality.
+
+## 2026-02-24
 ### X-ray 几何校正 (X-ray Geometry Correction)
 - **新功能**: 在 `OreAnalyzer` 中实现了由于点光源 X射线探测器引起图像畸变的几何校正能力。
 - **集成优化**:

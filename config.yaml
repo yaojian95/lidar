@@ -39,7 +39,7 @@ xray_sod: 40.0
 xray_sdd: 60.0
 
 # X-ray Crop Parameters (For fusion mode: xray)
-xray_cut_left: 50
+xray_cut_left: 130
 xray_cut_right: 120
 # X-ray ROI Crops (Applied after the cuts above)
 xray_crop_up: 330
@@ -59,7 +59,7 @@ rgb_crop_right: 90
 # Use this to match the physical FOV of the RGB crop
 lidar_crop_up: 0
 lidar_crop_down: 3
-lidar_crop_left: 15
+lidar_crop_left: 0
 lidar_crop_right: 0
 
 # Visualization
