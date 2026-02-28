@@ -54,6 +54,24 @@ public:
   // Step 2: Detection Methods
   std::vector<Ore> detectByLidar(float cluster_tolerance = 0.05f,
                                  int min_size = 50, int max_size = 50000);
+
+private:
+  // Hybrid Clustering Diagnostic Methods
+  bool
+  isClusterSuspiciousAspectRatio(const pcl::PointCloud<PointT>::Ptr &cluster,
+                                 float threshold) const;
+  bool isClusterSuspiciousConcavity(const pcl::PointCloud<PointT>::Ptr &cluster,
+                                    float threshold) const;
+  bool isClusterSuspiciousMultiPeak(
+      const pcl::PointCloud<PointT>::Ptr &cluster) const;
+
+  // Secondary Clustering for Suspicious Ores
+  std::vector<pcl::PointIndices>
+  applyRegionGrowing(const pcl::PointCloud<PointT>::Ptr &cluster,
+                     float smoothness_deg, float curvature_thr, int min_size,
+                     int max_size) const;
+
+public:
   Ore detectByROI(float min_x, float max_x, float min_y, float max_y);
   // Mask is a flat array (row-major), 1=ore, 0=background
   // This function assumes the mask covers a specific physical area [mask_min_x,
@@ -72,6 +90,13 @@ private:
   PointCloudPtr aligned_cloud_;
   float unit_scale_ = 1.0f;
   float ground_threshold_ = 0.02f;
+
+  // Hybrid Clustering Configuration
+  int hybrid_strategy_ = 0;
+  float aspect_ratio_threshold_ = 2.5f;
+  float density_threshold_ = 0.3f;
+  float rg_smoothness_ = 15.0f;
+  float rg_curvature_ = 1.0f;
 
 public:
   float getGroundThreshold() const { return ground_threshold_; }
@@ -99,6 +124,15 @@ public:
   void setGroundThresholdParams(float sigma, float margin) {
     ground_sigma_ = sigma;
     ground_margin_ = margin;
+  }
+  void setHybridClusteringConfig(int strategy, float aspect_ratio_thr,
+                                 float density_thr, float rg_smoothness,
+                                 float rg_curvature) {
+    hybrid_strategy_ = strategy;
+    aspect_ratio_threshold_ = aspect_ratio_thr;
+    density_threshold_ = density_thr;
+    rg_smoothness_ = rg_smoothness;
+    rg_curvature_ = rg_curvature;
   }
 
   // Explicitly Apply Filtering using current belt boundaries

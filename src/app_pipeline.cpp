@@ -126,6 +126,11 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
             << ", max_size=" << appConfig.max_cluster_size << "..."
             << std::endl;
 
+  analyzer.setHybridClusteringConfig(
+      appConfig.cluster_strategy, appConfig.aspect_ratio_threshold,
+      appConfig.density_threshold, appConfig.rg_smoothness,
+      appConfig.rg_curvature);
+
   auto ores = analyzer.detectByLidar(appConfig.cluster_tolerance,
                                      appConfig.min_cluster_size,
                                      appConfig.max_cluster_size);
@@ -143,15 +148,18 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
   std::string map_file =
       "E:/multi_source_info/lidar/pcd_data/thickness_map.png";
 
-  if (analyzer.saveThicknessMapToImage(thickness_map, map_file, -1.0f)) {
+  std::string fuse_mode = appConfig.fuse_mode;
+  std::transform(fuse_mode.begin(), fuse_mode.end(), fuse_mode.begin(),
+                 ::tolower);
+
+  std::vector<Ore> *ores_ptr = (fuse_mode == "false") ? &ores : nullptr;
+
+  if (analyzer.saveThicknessMapToImage(thickness_map, map_file, -1.0f,
+                                       ores_ptr)) {
     std::cout << "Global Thickness Map saved to: " << map_file << std::endl;
   } else {
     std::cerr << "Failed to save thickness map!" << std::endl;
   }
-
-  std::string fuse_mode = appConfig.fuse_mode;
-  std::transform(fuse_mode.begin(), fuse_mode.end(), fuse_mode.begin(),
-                 ::tolower);
 
   if (fuse_mode == "rgb") {
     OreAnalyzer::FusionCrops rgb_crops{

@@ -1,5 +1,5 @@
 ## 02-26
-- [ ] 
+- [ ] optimize: detectByLidar
 - [ ] implement: detect from XRT roi or mask
 
 ## 2026-01-30

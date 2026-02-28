@@ -1,39 +1,50 @@
 # pcd_path: "E:/multi_source_info/lidar/pcd_data/SaveData_4.ply"
 # pcd_path: "E:/multi_source_info/lidar/pcd_data/combined_cloud_0121.ply"
-pcd_path: "E:/multi_source_info/lidar/pcd_data/SaveData_0205_cropped.ply"
-# unit_scale: 3.527695 # unit_scale: 0.003375 # Conversion factor from point cloud units to physical meters. usage: physical_meters = point_cloud_unit * unit_scale
-unit_scale: 1
+pcd_path: "E:/multi_source_info/lidar/pcd_data/SaveData_contours_test_0227.ply"
+# pcd_path: "E:/multi_source_info/lidar/pcd_data/SaveData_0205_cropped.ply"
+unit_scale: 1.000000 # unit_scale: 3.527695 # unit_scale: 0.003375 # Conversion factor from point cloud units to physical meters. usage: physical_meters = point_cloud_unit * unit_scale
 # Plane detection options
 save_plane_equation: false  # If true, save detected plane to this file
-visual_plane: false          # If true, visualize the ground plane in viewer
+visual_plane: true          # If true, visualize the ground plane in viewer
 
 # Plane equation (auto-filled if save_plane_equation=true, or manually set)
 # Format: ax + by + cz + d = 0
-plane_a: 0.000023
-plane_b: -0.008888
-plane_c: 0.999960
-plane_d: -927.549683
-ground_threshold: 2.711232
+plane_a: 0.000004
+plane_b: -0.008782
+plane_c: 0.999961
+plane_d: -927.410950
+
+fit_belt_edges: false # If true, detect and calibrate side panels. If false, use belt_min_y/max_y directly.
 belt_min_y: -478.056000
 belt_max_y: 443.395081
-fit_belt_edges: false # If true, detect and calibrate side panels. If false, use belt_min_y/max_y directly.
-ground_filter_sigma: 6.000000
+
+ground_filter_sigma: 4.000000
 ground_filter_margin: 1.000000
+ground_threshold: 2.087664
 
 # Ore Detection (Euclidean Clustering)
 cluster_tolerance: 20.0 # Distance between points to be considered part of the same object (in point cloud units)
 min_cluster_size: 50    # Minimum number of points to form an ore chunk
 max_cluster_size: 50000 # Maximum number of points to form an ore chunk
 
+# Hybrid Clustering & Segmentation
+cluster_strategy: 0 # 0: Euclidean Only, 1: Aspect Ratio, 2: Concavity/Density, 3: Multi-peaks
+aspect_ratio_threshold: 2.5 # Aspect ratio > X triggers secondary Region Growing
+density_threshold: 0.3 # Bounding box occupancy density < X triggers secondary Region Growing
+rg_smoothness: 15.0 # Region Growing threshold in degrees (if normals change > X, split cluster)
+rg_curvature: 1.0 # Region Growing curvature threshold
+
 # Fusion Options
-fuse: "xray"            # Options: "rgb", "xray", "false"
+# fuse: "xray"            # Options: "rgb", "xray", "false"
+# fuse: "rgb"
+fuse: false
 fusion_channel: 2      # 0: Blue, 1: Green, 2: Red
 
 # X-ray Parameters
 xray_path: "E:/multi_source_info/lidar/pcd_data/20260205/xray_0p5ms-1.png"
 
 # X-ray Geometric Correction
-enable_xray_geometry_correction: true
+enable_xray_geometry_correction: false
 # M = sdd / sod. The image will be shrunk by 1/M.
 xray_sod: 40.0
 xray_sdd: 60.0
@@ -59,8 +70,8 @@ rgb_crop_right: 90
 # Use this to match the physical FOV of the RGB crop
 lidar_crop_up: 0
 lidar_crop_down: 3
-lidar_crop_left: 0
+lidar_crop_left: 15
 lidar_crop_right: 0
 
 # Visualization
-enable_visualization: false # Enable/Disable PCL visualization window
+enable_visualization: true # Enable/Disable PCL visualization window

@@ -11,7 +11,6 @@
 #include <pcl/segmentation/extract_clusters.h>
 #include <pcl/segmentation/sac_segmentation.h>
 
-
 OreAnalyzer::OreAnalyzer()
     : original_cloud_(new PointCloud), aligned_cloud_(new PointCloud) {}
 
@@ -21,9 +20,11 @@ void OreAnalyzer::setPointCloud(PointCloudPtr cloud) {
   pcl::copyPointCloud(*original_cloud_, *aligned_cloud_);
 }
 
-void OreAnalyzer::setConfig(float unit_scale, float ground_threshold) {
-  unit_scale_ = unit_scale;
-  ground_threshold_ = ground_threshold;
+// The inline setters are defined in the header file.
+
+void OreAnalyzer::setConfig(float scale, float ground_thresh) {
+  unit_scale_ = scale;
+  ground_threshold_ = ground_thresh;
 }
 
 bool OreAnalyzer::alignToGround() {
@@ -47,74 +48,12 @@ bool OreAnalyzer::alignToGround() {
     return false;
   }
 
-  // Store the plane coefficients
-  plane_a_ = coefficients->values[0];
-  plane_b_ = coefficients->values[1];
-  plane_c_ = coefficients->values[2];
-  plane_d_ = coefficients->values[3];
+  std::cout << "Successfully estimated planar model via RANSAC." << std::endl;
 
-  // Compute rotation to align plane normal to Z axis (0,0,1)
-  Eigen::Vector3f normal(coefficients->values[0], coefficients->values[1],
-                         coefficients->values[2]);
-  Eigen::Vector3f target_normal(0, 0, 1);
-
-  // Simple way: create a rotation from normal to target_normal
-  Eigen::Quaternionf rotation;
-  rotation.setFromTwoVectors(normal, target_normal);
-
-  Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
-  transform.block<3, 3>(0, 0) = rotation.toRotationMatrix();
-
-  // Apply temporary transform to find d' (distance to origin after rotation)
-  // The current plane equation is ax+by+cz+d=0.
-  // We want the new plane to be z = 0.
-  // Let's just transform the cloud first based on rotation.
-  PointCloudPtr rotated_cloud(new PointCloud);
-  pcl::transformPointCloud(*aligned_cloud_, *rotated_cloud, transform);
-
-  // Now find the Z of the inliers in the rotated cloud to determine translation
-  float z_sum = 0.0f;
-  for (int idx : inliers->indices) {
-    z_sum += rotated_cloud->points[idx].z;
-  }
-  float average_z = z_sum / inliers->indices.size();
-
-  // Final translation to bring the plane to Z=0
-  transform(2, 3) = -average_z;
-
-  // Apply full transform
-  pcl::transformPointCloud(*aligned_cloud_, *aligned_cloud_, transform);
-
-  std::cout << "Aligned ground to Z=0. Translation Z: " << -average_z
-            << std::endl;
-
-  // Check orientation: Are most points above or below Z=0?
-  // We expect ores to be "above" ground (Z > 0).
-  // If the centroid of the cloud (relative to ground) is negative, we might
-  // need to flip. Actually, let's just use a simple heuristic: if average Z of
-  // all points is negative, flip. Since ground is at 0, if there are objects,
-  // they pull the average up or down. Exception: if there is noise below
-  // ground. Better: Check 90th percentile vs 10th percentile distance from 0?
-  // Let's rely on the user's observation: "Z axis direction is opposite".
-  // Let's check the average Z of the aligned cloud.
-  double sum_z_aligned = 0;
-  for (const auto &p : *aligned_cloud_)
-    sum_z_aligned += p.z;
-  if (sum_z_aligned < 0) {
-    std::cout
-        << "Detected inverted Z-axis (objects below ground). Flipping Z..."
-        << std::endl;
-    Eigen::Matrix4f flip = Eigen::Matrix4f::Identity();
-    flip(2, 2) = -1.0f; // Flip Z
-    pcl::transformPointCloud(*aligned_cloud_, *aligned_cloud_, flip);
-  }
-
-  // Calculate actual ground thickness (Robustly)
-  recalculateGroundThreshold();
-
-  return true;
-
-  return true;
+  // Delegate the actual matrix transformation to the unified method
+  return alignToGroundWithPlane(
+      coefficients->values[0], coefficients->values[1], coefficients->values[2],
+      coefficients->values[3]);
 }
 
 bool OreAnalyzer::alignToGroundWithPlane(float a, float b, float c, float d) {
@@ -160,10 +99,6 @@ bool OreAnalyzer::alignToGroundWithPlane(float a, float b, float c, float d) {
   Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
   transform.block<3, 3>(0, 0) = rotation.toRotationMatrix();
 
-  // Apply rotation
-  PointCloudPtr rotated_cloud(new PointCloud);
-  pcl::transformPointCloud(*aligned_cloud_, *rotated_cloud, transform);
-
   // Compute translation based on plane equation
   // After rotation, the plane should be at some Z = constant
   // We can use the d coefficient to determine the offset
@@ -173,13 +108,16 @@ bool OreAnalyzer::alignToGroundWithPlane(float a, float b, float c, float d) {
   // Apply full transform
   pcl::transformPointCloud(*aligned_cloud_, *aligned_cloud_, transform);
 
-  std::cout << "Aligned ground using cached plane. Translation Z: "
-            << -average_z << std::endl;
+  std::cout << "Applied plane alignment. Translation Z: " << -average_z
+            << std::endl;
 
   // Check orientation (same heuristic)
   double sum_z_aligned = 0;
   for (const auto &p : *aligned_cloud_)
     sum_z_aligned += p.z;
+
+  std::cout << "Average Z of aligned cloud: "
+            << sum_z_aligned / aligned_cloud_->size() << std::endl;
   if (sum_z_aligned < 0) {
     std::cout
         << "Detected inverted Z-axis (objects below ground). Flipping Z..."
@@ -202,6 +140,196 @@ void OreAnalyzer::getPlaneCoefficients(float &a, float &b, float &c,
   d = plane_d_;
 }
 
+// =========================================================================
+// Hybrid Clustering Diagnostic Methods
+// =========================================================================
+
+bool OreAnalyzer::isClusterSuspiciousAspectRatio(
+    const pcl::PointCloud<PointT>::Ptr &cluster, float threshold) const {
+  if (cluster->empty())
+    return false;
+
+  PointT min_pt, max_pt;
+  pcl::getMinMax3D(*cluster, min_pt, max_pt);
+
+  float length_x = std::abs(max_pt.x - min_pt.x);
+  float length_y = std::abs(max_pt.y - min_pt.y);
+
+  if (length_y < 0.001f || length_x < 0.001f)
+    return false;
+
+  float aspect = std::max(length_x / length_y, length_y / length_x);
+  return aspect > threshold;
+}
+
+bool OreAnalyzer::isClusterSuspiciousConcavity(
+    const pcl::PointCloud<PointT>::Ptr &cluster, float threshold) const {
+  if (cluster->empty())
+    return false;
+
+  PointT min_pt, max_pt;
+  pcl::getMinMax3D(*cluster, min_pt, max_pt);
+
+  float length_x = std::abs(max_pt.x - min_pt.x);
+  float length_y = std::abs(max_pt.y - min_pt.y);
+
+  // Approximate the 2D bounding box area
+  float bbox_area = length_x * length_y;
+  if (bbox_area < 0.001f)
+    return false;
+
+  // To evaluate concavity, we compare the actual number of points against the
+  // expected points if the bounding box was dense. This is a rough heuristic.
+  // We assume uniform sampling. A better 2D heuristic: calculate the physical
+  // area covered by the points vs bbox area. For simplicity based on points:
+  float density_ratio =
+      static_cast<float>(cluster->size()) /
+      (bbox_area * 10000.0f); // Arbitrary scaling for heuristic
+  // Since point count vs area is scale-dependent, a more robust 2D grid
+  // approach is better:
+
+  // 2D Grid Occupancy Approach:
+  float resolution = 0.01f; // 1cm grid
+  int cols = static_cast<int>(length_x / resolution) + 1;
+  int rows = static_cast<int>(length_y / resolution) + 1;
+  int total_cells = cols * rows;
+  if (total_cells <= 0)
+    return false;
+
+  std::vector<bool> grid(total_cells, false);
+  int occupied_cells = 0;
+
+  for (const auto &p : *cluster) {
+    int c = static_cast<int>((p.x - min_pt.x) / resolution);
+    int r = static_cast<int>((p.y - min_pt.y) / resolution);
+    if (c >= 0 && c < cols && r >= 0 && r < rows) {
+      int idx = r * cols + c;
+      if (!grid[idx]) {
+        grid[idx] = true;
+        occupied_cells++;
+      }
+    }
+  }
+
+  float occupancy_ratio =
+      static_cast<float>(occupied_cells) / static_cast<float>(total_cells);
+  return occupancy_ratio <
+         threshold; // Lower occupancy = High concavity (irregular shape)
+}
+
+bool OreAnalyzer::isClusterSuspiciousMultiPeak(
+    const pcl::PointCloud<PointT>::Ptr &cluster) const {
+  if (cluster->points.size() < 100)
+    return false;
+
+  PointT min_pt, max_pt;
+  pcl::getMinMax3D(*cluster, min_pt, max_pt);
+
+  float length_x = std::abs(max_pt.x - min_pt.x);
+  float length_y = std::abs(max_pt.y - min_pt.y);
+
+  // Create a fast 2D height map (Z-map) to find peaks
+  float resolution = 0.02f; // 2cm resolution
+  int cols = static_cast<int>(length_x / resolution) + 1;
+  int rows = static_cast<int>(length_y / resolution) + 1;
+
+  if (cols <= 2 || rows <= 2 || cols > 500 || rows > 500)
+    return false; // Too small or too large to reliable peak find
+
+  std::vector<float> height_map(cols * rows, -1e9f);
+
+  // Populate height map
+  for (const auto &p : *cluster) {
+    int c = static_cast<int>((p.x - min_pt.x) / resolution);
+    int r = static_cast<int>((p.y - min_pt.y) / resolution);
+    if (c >= 0 && c < cols && r >= 0 && r < rows) {
+      int idx = r * cols + c;
+      if (p.z > height_map[idx]) {
+        height_map[idx] = p.z;
+      }
+    }
+  }
+
+  // Simple non-maximum suppression / local maxima finding
+  int peak_count = 0;
+  int window = 5; // 10cm window
+
+  for (int r = window; r < rows - window; ++r) {
+    for (int c = window; c < cols - window; ++c) {
+      int center_idx = r * cols + c;
+      float center_val = height_map[center_idx];
+
+      if (center_val <= 0.01f)
+        continue; // Ignore low peaks near ground
+
+      bool is_local_max = true;
+      for (int wr = -window; wr <= window; ++wr) {
+        for (int wc = -window; wc <= window; ++wc) {
+          if (wr == 0 && wc == 0)
+            continue;
+          int neighbor_idx = (r + wr) * cols + (c + wc);
+          if (height_map[neighbor_idx] >= center_val) {
+            is_local_max = false;
+            break;
+          }
+        }
+        if (!is_local_max)
+          break;
+      }
+
+      if (is_local_max) {
+        peak_count++;
+        if (peak_count > 1)
+          return true; // More than 1 distinct large peak found
+        // Skip nearby cells to avoid double counting the same peak
+        c += window;
+      }
+    }
+  }
+  return false;
+}
+
+#include <pcl/features/normal_3d.h>
+#include <pcl/segmentation/region_growing.h>
+
+std::vector<pcl::PointIndices>
+OreAnalyzer::applyRegionGrowing(const pcl::PointCloud<PointT>::Ptr &cluster,
+                                float smoothness_deg, float curvature_thr,
+                                int min_size, int max_size) const {
+
+  std::vector<pcl::PointIndices> sub_clusters;
+  if (cluster->empty())
+    return sub_clusters;
+
+  // 1. Estimate Normals
+  pcl::search::KdTree<PointT>::Ptr tree(new pcl::search::KdTree<PointT>);
+  tree->setInputCloud(cluster);
+  pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
+  pcl::NormalEstimation<PointT, pcl::Normal> normal_estimator;
+  normal_estimator.setSearchMethod(tree);
+  normal_estimator.setInputCloud(cluster);
+  normal_estimator.setKSearch(30); // Use 30 neighbors for good normal stability
+  normal_estimator.compute(*normals);
+
+  // 2. Region Growing
+  pcl::RegionGrowing<PointT, pcl::Normal> reg;
+  reg.setMinClusterSize(min_size);
+  reg.setMaxClusterSize(max_size);
+  reg.setSearchMethod(tree);
+  reg.setNumberOfNeighbours(30);
+  reg.setInputCloud(cluster);
+  reg.setInputNormals(normals);
+  reg.setSmoothnessThreshold(smoothness_deg / 180.0 *
+                             M_PI); // Degrees to Radians
+  reg.setCurvatureThreshold(curvature_thr);
+
+  reg.extract(sub_clusters);
+
+  return sub_clusters;
+}
+
+// =========================================================================
+
 std::vector<Ore> OreAnalyzer::detectByLidar(float cluster_tolerance,
                                             int min_size, int max_size) {
   std::vector<Ore> ores;
@@ -223,6 +351,67 @@ std::vector<Ore> OreAnalyzer::detectByLidar(float cluster_tolerance,
   ec.setInputCloud(aligned_cloud_);
   ec.extract(cluster_indices);
 
+  std::vector<pcl::PointIndices> final_cluster_indices;
+
+  // Evaluate each Euclidean cluster against Hybrid Strategies
+  for (const auto &indices : cluster_indices) {
+    if (indices.indices.empty())
+      continue;
+
+    bool suspicious = false;
+
+    // Fast pass if hybrid strategy is enabled
+    if (hybrid_strategy_ > 0) {
+      pcl::PointCloud<PointT>::Ptr cluster(new pcl::PointCloud<PointT>);
+      for (int idx : indices.indices) {
+        cluster->points.push_back(aligned_cloud_->points[idx]);
+      }
+      cluster->width = cluster->points.size();
+      cluster->height = 1;
+      cluster->is_dense = true;
+
+      if (hybrid_strategy_ == 1 &&
+          isClusterSuspiciousAspectRatio(cluster, aspect_ratio_threshold_)) {
+        suspicious = true;
+      } else if (hybrid_strategy_ == 2 &&
+                 isClusterSuspiciousConcavity(cluster, density_threshold_)) {
+        suspicious = true;
+      } else if (hybrid_strategy_ == 3 &&
+                 isClusterSuspiciousMultiPeak(cluster)) {
+        suspicious = true;
+      }
+
+      if (suspicious) {
+        std::cout << "  [Hybrid Clustering] Cluster of size " << cluster->size()
+                  << " flagged as suspicious. Applying Region Growing..."
+                  << std::endl;
+
+        auto sub_clusters = applyRegionGrowing(
+            cluster, rg_smoothness_, rg_curvature_, min_size, max_size);
+
+        if (!sub_clusters.empty()) {
+          // Remap sub_cluster indices back to the original aligned_cloud_
+          // indices
+          for (const auto &sub_c : sub_clusters) {
+            pcl::PointIndices mapped_indices;
+            for (int sub_idx : sub_c.indices) {
+              mapped_indices.indices.push_back(indices.indices[sub_idx]);
+            }
+            final_cluster_indices.push_back(mapped_indices);
+          }
+        } else {
+          // Fallback if region growing fails to find anything
+          final_cluster_indices.push_back(indices);
+        }
+      } else {
+        final_cluster_indices.push_back(indices);
+      }
+    } else {
+      // Strategy 0: Pure Euclidean
+      final_cluster_indices.push_back(indices);
+    }
+  }
+
   // Helper struct for sorting
   struct ClusterInfo {
     pcl::PointIndices indices;
@@ -230,7 +419,7 @@ std::vector<Ore> OreAnalyzer::detectByLidar(float cluster_tolerance,
   };
   std::vector<ClusterInfo> sorted_clusters;
 
-  for (const auto &indices : cluster_indices) {
+  for (const auto &indices : final_cluster_indices) {
     if (indices.indices.empty())
       continue;
 
@@ -909,12 +1098,51 @@ bool OreAnalyzer::saveThicknessMapToImage(const ThicknessMap &map,
   // Transpose the image as requested
   cv::Mat transposed_image;
   cv::transpose(image, transposed_image);
-  // Also flip required? User said "Left/Right matches".
-  // Let's assume transpose is enough for now.
+
+  // Convert grayscale to BGR if we need to draw colored text, or just draw
+  // white text. Actually, to make text visible against white/black background,
+  // let's convert to BGR so we can draw colored (e.g., Green or Red) labels.
+  cv::Mat final_image;
+  if (ores != nullptr && !ores->empty()) {
+    cv::cvtColor(transposed_image, final_image, cv::COLOR_GRAY2BGR);
+
+    for (const auto &ore : *ores) {
+      if (ore.point_indices->indices.empty())
+        continue;
+
+      // Calculate center in physical coordinates
+      float center_x = (ore.min_x + ore.max_x) / 2.0f;
+      float center_y = (ore.min_y + ore.max_y) / 2.0f;
+
+      // Convert physical coordinates to pixel coordinates on the un-transposed
+      // map Note: map generation uses: col = (x - min_x) / res row = (max_y -
+      // y) / res
+      int map_c = static_cast<int>((center_x - map.min_x) / map.resolution);
+      int map_r = static_cast<int>((map.max_y - center_y) / map.resolution);
+
+      // After transpose, image metrics swap:
+      // transposed_row = map_c;
+      // transposed_col = map_r;
+      int img_r = map_c;
+      int img_c = map_r;
+
+      if (img_r >= 0 && img_r < final_image.rows && img_c >= 0 &&
+          img_c < final_image.cols) {
+        std::string label = ore.id;
+        if (label.find("ore_") == 0)
+          label = label.substr(4);
+
+        cv::Point pos(img_c, img_r);
+        cv::putText(final_image, label, pos, cv::FONT_HERSHEY_SIMPLEX, 0.8,
+                    cv::Scalar(0, 255, 0), 2); // Green text
+      }
+    }
+  } else {
+    final_image = transposed_image;
+  }
 
   // Save using OpenCV
-  // Note: OpenCV supports .pgm, .png, .jpg etc. based on extension
-  return cv::imwrite(filename, transposed_image);
+  return cv::imwrite(filename, final_image);
 }
 
 // Fuse Thickness Map with RGB Image
@@ -1257,25 +1485,77 @@ bool OreAnalyzer::fuseThicknessWithXray(
   cv::resize(map_cropped, map_resized, final_image.size(), 0, 0,
              cv::INTER_LINEAR);
 
-  // 7. Overlay
-  // We'll increment the Red channel (channel 2) or use a heatmap?
-  // User asked to fuse. Simple addition to Red is effective.
+  // 7. Apply Colormap and Overlay
+  // Create a mask to only blend where thickness > 0
+  cv::Mat mask;
+  cv::threshold(map_resized, mask, 0.001f, 255, cv::THRESH_BINARY);
+  mask.convertTo(mask, CV_8UC1);
+
+  // Find actual min and max thickness in the visible area to stretch the
+  // contrast, but use Mean and StdDev to ignore noisy single-pixel spikes
+  cv::Mat mean, stddev;
+  cv::meanStdDev(map_resized, mean, stddev, mask);
+  double m = mean.at<double>(0, 0);
+  double s = stddev.at<double>(0, 0);
+
+  // Use a strictly focused range to force high contrast
+  // A Mean of ~11.0 with a StdDev of ~8.8 means the data is very skewed.
+  // We'll clip aggressively at Mean + 0.8 * StdDev to throw all the heavier
+  // chunks into Red territory and force the 0-15mm range to occupy the full
+  // spectrum.
+  double robust_min = std::max(0.0, m - 0.5 * s);
+  double robust_max = m + 0.8 * s;
+
+  std::cout << "[Jet Colormap] Contrast bounds aggressively set to min: "
+            << robust_min << ", max: " << robust_max << std::endl;
+
+  // Safe bounds check
+  if (robust_max <= 0.0001)
+    robust_max = 1.0;
+  if (robust_min >= robust_max)
+    robust_min = 0.0;
+
+  // Normalize mapped thickness to 0-255 for the colormap, stretching to max
+  // contrast
+  cv::Mat norm_map = cv::Mat::zeros(map_resized.size(), CV_8UC1);
   for (int r = 0; r < map_resized.rows; ++r) {
     for (int c = 0; c < map_resized.cols; ++c) {
-      float val = map_resized.at<float>(r, c);
-      if (val <= 0.001f)
-        continue;
+      if (mask.at<uchar>(r, c) > 0) {
+        float val = map_resized.at<float>(r, c);
+        // Exaggerate differences by stretching the robust bounds to 0 and 255
+        float norm_val =
+            (val - robust_min) / (robust_max - robust_min) * 255.0f;
+        if (norm_val < 0.0f)
+          norm_val = 0.0f;
+        if (norm_val > 255.0f)
+          norm_val = 255.0f;
+        norm_map.at<uchar>(r, c) = static_cast<uchar>(norm_val);
+      }
+    }
+  }
 
-      float norm_val = (val / max_v) * 255.0f;
-      if (norm_val > 255.0f)
-        norm_val = 255.0f;
+  // Apply Jet Colormap
+  cv::Mat color_map;
+  cv::applyColorMap(norm_map, color_map, cv::COLORMAP_JET);
 
-      // Add to Red channel
-      int current_red = final_image.at<cv::Vec3b>(r, c)[2];
-      int new_red = current_red + static_cast<int>(norm_val);
-      if (new_red > 255)
-        new_red = 255;
-      final_image.at<cv::Vec3b>(r, c)[2] = static_cast<uint8_t>(new_red);
+  // Merge the colormap output with the X-ray RGB image using a mask and
+  // blending
+  float alpha = 0.8f; // Weight for the colormap
+  float beta = 1.0f - alpha;
+
+  for (int r = 0; r < final_image.rows; ++r) {
+    for (int c = 0; c < final_image.cols; ++c) {
+      if (mask.at<uchar>(r, c) > 0) {
+        cv::Vec3b bg = final_image.at<cv::Vec3b>(r, c);
+        cv::Vec3b fg = color_map.at<cv::Vec3b>(r, c);
+
+        final_image.at<cv::Vec3b>(r, c)[0] =
+            cv::saturate_cast<uchar>(fg[0] * alpha + bg[0] * beta);
+        final_image.at<cv::Vec3b>(r, c)[1] =
+            cv::saturate_cast<uchar>(fg[1] * alpha + bg[1] * beta);
+        final_image.at<cv::Vec3b>(r, c)[2] =
+            cv::saturate_cast<uchar>(fg[2] * alpha + bg[2] * beta);
+      }
     }
   }
 
@@ -1310,7 +1590,8 @@ bool OreAnalyzer::fuseThicknessWithXray(
       int c_scaled = static_cast<int>(c_cropped * scale_x);
 
       int rgb_r = r_scaled;
-      int rgb_c = c_scaled;
+      // Offset label slightly to the right so it doesn't obscure the center
+      int rgb_c = c_scaled + 40;
 
       if (rgb_r >= 0 && rgb_r < final_image.rows && rgb_c >= 0 &&
           rgb_c < final_image.cols) {
@@ -1320,7 +1601,7 @@ bool OreAnalyzer::fuseThicknessWithXray(
 
         // Use Green for text to contrast with Red thickness
         cv::putText(final_image, label, cv::Point(rgb_c, rgb_r),
-                    cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(255, 0, 0), 2);
+                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 0, 0), 1);
       }
     }
   }

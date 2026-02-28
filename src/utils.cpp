@@ -47,6 +47,13 @@ AppConfig Config::parseAppConfig(const YAML::Node &config) {
   app.min_cluster_size = get<int>(config, "min_cluster_size", 50);
   app.max_cluster_size = get<int>(config, "max_cluster_size", 50000);
 
+  app.cluster_strategy = get<int>(config, "cluster_strategy", 0);
+  app.aspect_ratio_threshold =
+      get<float>(config, "aspect_ratio_threshold", 2.5f);
+  app.density_threshold = get<float>(config, "density_threshold", 0.3f);
+  app.rg_smoothness = get<float>(config, "rg_smoothness", 15.0f);
+  app.rg_curvature = get<float>(config, "rg_curvature", 1.0f);
+
   app.fuse_mode = get<std::string>(config, "fuse", "false");
   app.fusion_channel = get<int>(config, "fusion_channel", 2);
 

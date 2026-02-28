@@ -373,40 +373,18 @@ bool OreAnalyzer::alignToGround() {
 4. 输出: `coefficients = [a, b, c, d]`（法向量 + 距离）
 
 ```cpp
-    // Step 2: 计算旋转矩阵
-    Eigen::Vector3f normal(a, b, c);
-    Eigen::Vector3f target_normal(0, 0, 1);  // Z 轴
-    Eigen::Quaternionf rotation;
-    rotation.setFromTwoVectors(normal, target_normal);
-```
-
-**旋转逻辑**:
-- 将平面法向量 `(a, b, c)` 旋转到 `(0, 0, 1)`
-- 使用四元数计算旋转矩阵
-
-```cpp
-    // Step 3: 计算平移量
-    pcl::transformPointCloud(*aligned_cloud_, *rotated_cloud, transform);
-    float average_z = (所有内点的 Z 坐标之和) / 内点数量;
-    transform(2, 3) = -average_z;  // Z 方向平移
-```
-
-**平移逻辑**:
-- 旋转后，地面可能在 Z=5 或 Z=-3
-- 计算地面点的平均 Z 值
-- 平移使其归零
-
-```cpp
-    // Step 4: 应用完整变换
-    pcl::transformPointCloud(*aligned_cloud_, *aligned_cloud_, transform);
+    // Step 2: 调用统一的对齐流
+    return alignToGroundWithPlane(
+        coefficients->values[0], coefficients->values[1], 
+        coefficients->values[2], coefficients->values[3]);
 }
 ```
 
-**结果**: 
-- 地面点的 Z ≈ 0
-- 矿石点的 Z = 实际厚度
+**对齐逻辑**:
+- RANSAC 成功提取出这 4 个平面系数值之后，直接将它们全权交由缓存驱动的核心函数 `alignToGroundWithPlane` 执行具体的点云旋转、代数平移与轴向翻转等全部复合矩阵操作，统一代码流向。
+- 如果提取失败，程序将中止对齐。
 
-**注意**: 此方法会自动将检测到的平面系数存储在 `plane_a_`, `plane_b_`, `plane_c_`, `plane_d_` 中。
+**注意**: 此方法实际上也是通过向核心流水线输送 `plane_a/b/c/d` 参数，间接存储了当前实时检测到的地面系数状态。
 
 ---
 
@@ -429,18 +407,21 @@ bool OreAnalyzer::alignToGroundWithPlane(float a, float b, float c, float d) {
     Eigen::Quaternionf rotation;
     rotation.setFromTwoVectors(normal, Eigen::Vector3f(0, 0, 1));
     
-    // 计算平移量
+    // 代数计算平移量 (距离公式倒推)
+    // 根据空间解析几何「点到平面的距离公式」，原点 (0,0,0) 到平面 ax+by+cz+d=0 的有向距离即为 d / sqrt(a*a+b*b+c*c)。
+    // 由于我们刚刚计算把该平面的法向量旋转到了 Z 轴正方向 (0,0,1)，此时这个平面与 XY 平面平行。
+    // 因此，它的 Z 轴截距 (即整个平面上所有点的统一 Z 坐标) 必然就等于该距离的反向。
     float average_z = -d / sqrt(a*a + b*b + c*c);
-    transform(2, 3) = -average_z;
+    transform(2, 3) = -average_z; // 在 4x4 齐次矩阵中注入 Z 方向平移分量，以将其归零
     
-    // 应用变换
+    // 应用复合变换 (此时的 transform 矩阵已同时整合了旋转和平移，一步完成最终的对齐，省去了冗余的中间态计算)
     pcl::transformPointCloud(*aligned_cloud_, *aligned_cloud_, transform);
 }
 ```
 
 **优点**: 
-- 速度快（无需 RANSAC 迭代）
-- 结果一致（每次运行使用相同的平面）
+- 速度极快（既跳过了 RANSAC 迭代，又通过纯代数几何公式直接解算出平移距离，无需经历任何中间态点云的旋转与遍历提取）
+- 结果一致（每次运行都严格使用相同的缓存平面参数）
 
 ---
 
@@ -474,13 +455,13 @@ std::vector<Ore> OreAnalyzer::detectByLidar(
     float cluster_tolerance,  // 聚类距离阈值 (默认 0.05m)
     int min_size,             // 最小点数 (默认 50)
     int max_size              // 最大点数 (默认 50000)
-) {
+) 
 ```
 
 **Step 1: 过滤地面点**
 ```cpp
 for (size_t i = 0; i < aligned_cloud_->size(); ++i) {
-    if (aligned_cloud_->points[i].z > ground_threshold_ * 2.0f) {
+    if (aligned_cloud_->points[i].z > ground_threshold_) {
         non_ground_indices->indices.push_back(i);
     }
 }
@@ -504,9 +485,38 @@ ec.extract(cluster_indices);
 4. 形成一个簇（cluster）
 5. 重复直到所有点被访问
 
-**Step 3: 创建 Ore 对象**
+**Step 3: 混合架构聚类后处理 (Hybrid Clustering)**
+因为纯距离驱动的 `EuclideanClusterExtraction` 容易将物理上挨得很近的多个矿石误识别为一块大的。现在引入了智能联合诊断：
+
 ```cpp
-for (const auto& it : cluster_indices) {
+if (hybrid_strategy_ > 0) {
+    bool suspicious = false;
+    // 策略 1: 宽高比检测 (长细比排查)
+    if (hybrid_strategy_ == 1 && isClusterSuspiciousAspectRatio(cluster, aspect_ratio_threshold_)) suspicious = true;
+    
+    // 策略 2: 下凹密实度检测 (异形排查)
+    else if (hybrid_strategy_ == 2 && isClusterSuspiciousConcavity(cluster, density_threshold_)) suspicious = true;
+    
+    // 策略 3: 多焦点Z图检测 (扫描高峰排查)
+    else if (hybrid_strategy_ == 3 && isClusterSuspiciousMultiPeak(cluster)) suspicious = true;
+
+    if (suspicious) {
+        // 如果触发了上述警报，挂载带法线估计的超声波切刀 RegionGrowing 区域生长法
+        auto sub_clusters = applyRegionGrowing(cluster, rg_smoothness_, rg_curvature_, min_size, max_size);
+        // ...用 sub_clusters 替换原有的粗聚类
+    }
+}
+```
+
+**诊断手段与二次切割原理**:
+1. 宽长比失调: `max(X / Y, Y / X) > threshold` 表明极有可能是两块石头连一块儿了。
+2. 形状下凹/不密实: 将实际点云反投影至其自己的包围边界框 `[MinX, MaxX] × [MinY, MaxY]` 计算 2D 网格填充率，占比极少说明形状像葫芦或哑铃。
+3. `MultiPeak`: 在内部生成 Z轴 微缩地形图，如果有多个互不隶属的高耸山峰，必是多块分离的石头。
+4. **`RegionGrowing` (区域生长切断)**: 使用法线 `pcl::NormalEstimation` 获取点云表面切角。石头堆叠处通常会产生锐利的高折变角度凹槽（两球相交处），`reg.setSmoothnessThreshold()` 一旦扫描到折角大于给定的平滑容忍度（默认 15度），生长即刻中断，从而完美沿石头接缝处切成互相独立的新个体！
+
+**Step 4: 创建 Ore 对象**
+```cpp
+for (const auto& it : final_cluster_indices) {
     Ore ore;
     ore.id = "ore_" + std::to_string(ore_id++);
     ore.point_indices = 映射回原始点云的索引;
@@ -648,6 +658,20 @@ for (迭代 3 次) {
 - 使用邻居的平均值填充空格
 - 迭代 3 次可以填充较大的空洞
 - 更高级的方法: IDW (反距离加权)、Kriging
+
+---
+
+#### 6. `saveThicknessMapToImage()` - 保存与底图着色
+
+```cpp
+bool OreAnalyzer::saveThicknessMapToImage(
+    const ThicknessMap &map, 
+    const std::string &filename,
+    float max_val,
+    const std::vector<Ore> *ores) 
+```
+
+**功能扩展**: 除了传统的将网格压印成灰度深度图并执行转置外，如果主流程中关闭了视觉融合 (`fuse: false`)，则将原始的 255 灰度通道扩展为 BGR 三通道，并且在此函数内部提前根据物理坐标 `[min_x, max_x/y]` 将它们逆换算成转置后图片的像素系，**直接在素颜深度图 `thickness_map.png` 上绘制绿色的矿石 ID 框图**。
 
 ---
 

@@ -33,6 +33,13 @@ struct AppConfig {
   int min_cluster_size = 50;
   int max_cluster_size = 50000;
 
+  // Hybrid Clustering Strategies
+  int cluster_strategy = 0;
+  float aspect_ratio_threshold = 2.5f;
+  float density_threshold = 0.3f;
+  float rg_smoothness = 15.0f;
+  float rg_curvature = 1.0f;
+
   // Fusion Control
   std::string fuse_mode = "false";
   int fusion_channel = 2; // Default Red

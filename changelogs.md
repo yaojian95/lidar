@@ -1,20 +1,44 @@
+## 2026-02-28
+
+### 代码重构与复用 (Code Refactoring & Reuse)
+- **合并平面对齐逻辑**: 发现 `alignToGround` (基于 RANSAC 动态提取) 与 `alignToGroundWithPlane` (基于缓存参数) 的点云旋转矩阵推导及 Z 轴翻转代码高度重合且存在重复计算。现已将二者的变换算法完全并轨——`alignToGround` 在执行完 RANSAC 提取出内点方程后，将直接全权委托调用统一函数执行单向数据流对齐，消除了庞大冗余的重复逻辑和潜在的中间态资源消耗。
+
+### 性能优化 (Performance Optimization)
+- **移除冗余的点云旋转**: 在 `OreAnalyzer::alignToGroundWithPlane` 方法中，移除了一次针对临时变量 `rotated_cloud` 的无用运算 (`pcl::transformPointCloud`)。原因为平移量其实可以通过被缓存的平面方程直接代数求出，而第二次变换操作已在一个 `transform` 中同时整合了旋转和平移作用于原点云，故第一次旋转纯属冗余且会徒增内存和算力开销。
+
+## 2026-02-27
+
+### UI 智能感知绘图 (Smart UI Labeling Rendering)
+- **直接渲染至厚度图**: 增强了 `saveThicknessMapToImage` 函数的表现力。如果用户在 `config.yaml` 中关闭了任何融合图层渲染 (`fuse: false`)，则 `app_pipeline` 截留在主流程中的矿石清单会被直接下放传递给厚度图保存器中；保存器会自动将原本单通道灰度的像素深度图升级为三通道彩色，并将所有矿石自身的物理尺寸坐标系全部逆运算并锁定映射至倒转后的厚度图空间点位，为其直接绘上清晰的绿色标识文字 (Labeling IDs)。如此以来，无论用户使用花里胡哨的色彩融合，或是极简的黑白厚度输出，都有标签可看。
+
+### 混合架构聚类分割 (Hybrid Clustering Segmentation)
+- **新功能**: 为了解决原本纯粹的欧氏聚类会导致物理贴合的非单一矿石被错误合并的问题，实现了基于多指标联合诊断的“混合架构聚类”。
+- **三种诊断策略**: 在 `config.yaml` 中新增 `cluster_strategy` 控制诊断逻辑。
+  - **策略 `1` (宽高比检测)**: 计算粗聚类簇在 XY 平面的长细比 (`aspect_ratio_threshold`)，长条形连续粘合物将被拦截。
+  - **策略 `2` (下凹密实度检测)**: 评估点云密度占其包围盒面积的比例 (`density_threshold`)，葫芦状或多球贴合等高度不规则形状将被拦截。
+  - **策略 `3` (多焦点 Z 图检测)**: 生成局部二维高度图扫描山峰，拥有超过 1 个显著局部极大值的粘合簇将被拦截。
+- **动态局部分割 (Region Growing)**: 任何触发了上述警报策略的簇，系统将立刻计算点云的表面三维法线特征，并调用 `pcl::RegionGrowing` 沿表面法线折角 (`rg_smoothness`) 缝隙进行二次精密切断。
+
 ## 2026-02-26
 
-### Pipeline Extraction
-- **Extracted Pipeline Methods**: Created a new dedicated module `app_pipeline.h` and `src/app_pipeline.cpp`. All static helper functions (`loadPointCloud`, `processCalibrationAndGround`, `executeDetectionAndFusion`, `visualizeResults`) that were clogging up `main.cpp` have been moved here under the `AppPipeline` namespace.
-- **Clean Entrypoint**: `main.cpp` now only contains `#include` headers and a clean 50-line `int main()` orchestrator, which drastically improves clarity and organization.
-- **Compilation Update**: Added `src/app_pipeline.cpp` to `CMakeLists.txt`'s `add_executable` list.
+### X-ray 融合可视化体验提升 (X-ray Fusion Visualization Enhancement)
+- **Jet 色阶热力图映射**: 全面升级了 `fuseThicknessWithXray` 融合方法。去掉了原来直接极其暴力地加在红色通道上的方式；现在的厚度地图会在裁剪后自动映射出类似热力地形图的绚丽 Jet ColorMap 色阶（从薄如蝉翼的深蓝，平滑过渡到厚重凸起的深红），呈现出极其清晰的厚度层次感。
+- **抗噪统计对比度拉伸**: 弃用了容易被雷达反光尖刺拉爆色域的绝对极小极大值算子；转而通过统计学求取全体视场的均值 (Mean) 和标准差 (StdDev)，对色盘阈值上下限使用了极其激进的切割（`Mean + 0.8 * StdDev` 等），将真正的矿石主体的微小落差在彩色视觉上强制放大。
+- **标签位置优化**: 矿石 ID 原先画在正中心容易挡住最高峰的色值，现已全面固定向右侧平移 `40` 个绝对像素，让中心区域暴露无遗。
 
-### Configuration Centralization & `main.cpp` Modularization
-- **Added `AppConfig` Struct**: Created `AppConfig` inside `utils.h` to strongly type and centralize all configuration variables read from `config.yaml`.
-- **Refactored Config Access**: Moved the extensive `Config::get<T>` extraction logic from `main.cpp` into a dedicated `Config::parseAppConfig` method inside `utils.cpp`. 
-- **Modularized `main.cpp` Workflow**: Split the massive 400-line `main()` function into four clear logical steps:
-  - `loadPointCloud(...)`
-  - `processCalibrationAndGround(...)`
-  - `executeDetectionAndFusion(...)`
-  - `visualizeResults(...)`
-  
-  This makes the main pipeline function short, directory-style, and highly readable without affecting functionality.
+### Pipeline 架构提取解耦 (Pipeline Extraction)
+- **提取重构 Pipeline 方法**: 新建了独立的核心流程控制大模块 `app_pipeline.h` 和 `src/app_pipeline.cpp`。将原先堆积堵塞在 `main.cpp` 里的极其冗长复杂的各种操作流封装重构到了 `AppPipeline` 命名空间下。
+- **极简化主存根**: 原本近 400 行庞大的 `main.cpp` 在经历了剔骨之后，现在变成了一个清爽简明的如同顶级目录的 50 行编排脚本，易读性呈现指数级上升。
+- **构建系统跟进**: 在 `CMakeLists.txt` 的 `add_executable` 目标中准入并链接了新诞生的 `src/app_pipeline.cpp` 源文件。
+
+### 配置中心化 (Configuration Centralization)
+- **新建强类型 `AppConfig` 结构体**: 在 `utils.h` 中新设了该结构体以集中规范化原本那些散落在各处的、使用魔法字符串读取的无强类型的弱关联变量。
+- **分离重构读取逻辑**: 将 `main.cpp` 里的那一大串 `Config::get<T>` 提取解组，收拢打包进了 `utils.cpp` 中的 `Config::parseAppConfig` 里面去，实现读用分离。
+- **四步走流水线**: `main()` 大改后，现明确严格遵循四段论：
+  - `loadPointCloud(...)`，负责 IO
+  - `processCalibrationAndGround(...)`，负责对齐与筛除去噪
+  - `executeDetectionAndFusion(...)`，负责特征发现截取和视觉融合
+  - `visualizeResults(...)`，负责拉起最终 3D GUI 引擎。
 
 ## 2026-02-24
 ### X-ray 几何校正 (X-ray Geometry Correction)
