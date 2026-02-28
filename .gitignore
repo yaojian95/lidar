@@ -86,4 +86,4 @@ data/
 *.bin
 
 *.jpg
-*.png
+# *.png

@@ -108,6 +108,39 @@ bool processCalibrationAndGround(OreAnalyzer &analyzer, AppConfig &appConfig,
                    "boundaries: "
                 << appConfig.belt_min_y << " to " << appConfig.belt_max_y
                 << std::endl;
+
+      // Calculate and output belt points resolution
+      float physical_width =
+          std::abs(appConfig.belt_max_y - appConfig.belt_min_y);
+      if (physical_width > 0.0f) {
+        // Estimate the number of points in a single scanline (cross-belt
+        // direction) Since typical lidar sweeps form a profile line, we look
+        // for the first Y "wraparound"
+        size_t points_per_line = analyzer.getAlignedCloud()->size(); // fallback
+        if (points_per_line > 1) {
+          for (size_t i = 1; i < analyzer.getAlignedCloud()->size(); ++i) {
+            float dy = std::abs(analyzer.getAlignedCloud()->points[i].y -
+                                analyzer.getAlignedCloud()->points[i - 1].y);
+            // A massive jump in Y typically implies completing one line and
+            // returning to the start for the next
+            if (dy > physical_width * 0.5f) {
+              points_per_line = i;
+              break;
+            }
+          }
+        }
+
+        if (points_per_line > 0) {
+          // Resolution is Physical Distance / Point Count -> mm/point
+          float resolution =
+              physical_width / static_cast<float>(points_per_line);
+          std::cout << "Belt Cloud Resolution: " << resolution
+                    << " mm/point (Width: " << physical_width
+                    << "mm, Points per line: " << points_per_line << ")"
+                    << std::endl;
+        }
+      }
+
       analyzer.setBeltBoundaries(appConfig.belt_min_y, appConfig.belt_max_y);
       analyzer.filterSidePanels();
     }
@@ -138,7 +171,10 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
 
   for (auto &ore : ores) {
     analyzer.computeStats(ore, false);
-    std::cout << "Ore " << ore.id << ": Avg Thickness = " << ore.avg_thickness
+    size_t point_count =
+        ore.point_indices ? ore.point_indices->indices.size() : 0;
+    std::cout << "Ore " << ore.id << " [" << point_count
+              << " pts]: Avg Thickness = " << ore.avg_thickness
               << " (Max: " << ore.max_thickness << ")" << std::endl;
   }
 
@@ -146,7 +182,8 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
   auto thickness_map =
       analyzer.generateGlobalThicknessMap(ores, appConfig.unit_scale);
   std::string map_file =
-      "E:/multi_source_info/lidar/pcd_data/thickness_map.png";
+      "E:/multi_source_info/lidar/pcd_data/thickness_map_strategy_" +
+      std::to_string(appConfig.cluster_strategy) + ".png";
 
   std::string fuse_mode = appConfig.fuse_mode;
   std::transform(fuse_mode.begin(), fuse_mode.end(), fuse_mode.begin(),
@@ -171,7 +208,8 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
     std::string rgb_path =
         "E:/multi_source_info/lidar/pcd_data/stitched_ore.jpg";
     std::string fused_path =
-        "E:/multi_source_info/lidar/pcd_data/fused_thickness.jpg";
+        "E:/multi_source_info/lidar/pcd_data/fused_thickness_strategy_" +
+        std::to_string(appConfig.cluster_strategy) + ".jpg";
 
     std::cout << "Fusing thickness map with RGB image..." << std::endl;
     if (analyzer.fuseThicknessWithImage(thickness_map, rgb_path, fused_path,
@@ -190,7 +228,8 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
           appConfig.lidar_crop_up, appConfig.lidar_crop_down,
           appConfig.lidar_crop_left, appConfig.lidar_crop_right};
       std::string fused_xray_path =
-          "E:/multi_source_info/lidar/pcd_data/fused_thickness_xray.jpg";
+          "E:/multi_source_info/lidar/pcd_data/fused_thickness_xray_strategy_" +
+          std::to_string(appConfig.cluster_strategy) + ".jpg";
 
       std::cout << "Fusing thickness map with X-ray image ("
                 << appConfig.xray_path << ")..." << std::endl;
