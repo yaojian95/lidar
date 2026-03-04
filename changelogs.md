@@ -1,6 +1,26 @@
-## 2026-02-28
+## 2026-03-04
+### 补全双能 X-ray (高能与低能) 同步坐标对齐及图像保存
+- **提取并保存高能 X 射线图像**: 完善了 X-ray 模式下的双能图片读取。现在引擎不仅从源图像的左半部分切割出低能图像，同时也从右半部分精准裁剪出高能图像。高能图像会同步经历翻转 (`flip`)、去废边 (`cut`)、ROI 裁切 (`crop`) 以及畸变矫正 (`correctXrayGeometry`)，最终被保存为 `results/cropped_xray_high_for_fusion.jpg` 供融合观测参考。
+- **高能图像掩码穿透映射 (`extracted_contours_overlay_high`)**: 在使用低能 X 射线图像完成边缘检测并提取出 `valid_contours` 后，系统现在会将这些精细的掩码轮廓同时无缝挂载映射到高清的“高能图像”之上，并专门保存一份由红线圈出的高能重叠对比图 (`extracted_contours_overlay_high.jpg`)。
 
-### 核心输出指标升级 (Core Output Metrics Upgrade)
+## 2026-03-03
+### 修复坐标轴映射倒置导致提取框失效的严重 Bug 
+- **重构轮廓逆推寻点逻辑 (Method 2)**: 彻底弃用了原有“将图像里的轮廓逐个逆推算其物理包围盒坐标，然后再硬套入雷达空间求点”的复杂且极易因 Y 轴上下颠倒而翻车的设计。
+- **全局 Thickness Map 前置生成**: 重构了 `app_pipeline.cpp` 的核心流程。现在即使是图像或选区检测模式，也会**率先强行利用所有点生成一份 2D 全局厚度底图 (`Thickness Map`)**。
+- **底层深度图自适应扩充 (`alignThicknessMapToImage`)**: 响应需求，现在当图片生成后，不再是将高分辨率 RGB/X-Ray 掩码缩小以适应低分辨率雷达深度图；而是强行**将点云深度图 (Thickness Map) 直接拉伸扩充到图像的分辨率级别**！不仅统一了所有坐标系统，也让融合算法 (`fuseThicknessWithImage/Xray`) 直接进入了 1:1 的完美像素重叠通道，彻底砍掉了融合器里冗杂的转置、计算 Crop 放缩代码。
+- **在原始图像栅格中实现完美套准 (`detectByMask`)**: 依靠拉伸后的底图，雷达找点时不再比对固定的物理坐标，而是直接拿着自己的点云坐标算作在裁切区域的 `[0, 1]` 相对位置，然后按比例投射到对应的原生高清 `Mat mask` 像素坐标中看像素值。确立了以高分辨率 2D 图像作主导的全新架构。
+- **独立纯净版矿石深度图 (`ores_thickness_map`)**: 流程现在会额外生成并保存一张与原图等大、但**仅包含被成功检测出的 Ores 内部点**的深度图。且现在与 RGB/X-ray 图像进行的视觉融合，都会优先采用这张剔除了背景杂点的纯净深度图，使得重叠效果更加清爽。
+
+## 2026-03-02
+
+### 扩充矿石检测模式 (Expand Ore Detection Mode)
+- **新增由图像提取矿石轮廓**: 在 `OreAnalyzer` 类中实现了 `extractOresFromImage` 方法，利用 OpenCV (如 `cv::cvtColor`, `cv::threshold`, `cv::findContours`) 将输入的 RGB或 XRT 图像进行二值化并提取轮廓，输出带有物理坐标及掩码信息的自定义结构体 (`ImageContour`)。提取时会将找到的轮廓描边叠加回原图并保存至 `results/` 目录下以便调试。
+- **精准物理坐标映射复用**: 提取并封装了用于推算图像真实物理边界的独立函数 `computeCropBounds`（内聚在 `OreAnalyzer` 类中）。该计算囊括了点云原始极值、皮带限定宽度，以及 `lidar_crop_*` 设置项在物理层面上对齐引入的边缘切除位移（彻底移除了旧版代码中人为硬编的 5 像素扩展边距误差以实现 1:1 纯粹对齐）。该函数的复用彻底取代了 pipeline 分离计算的冗余，确保图像选区(`mask/roi`)能与原始点云进行精确重合匹配。同时，该函数也已被接管进 `fuseThicknessWithImage` 及 `fuseThicknessWithXray` 的核心逻辑中，以替代手动从图像边界直接裁剪的粗略逻辑。
+- **配置化检测模式**: 在 `config.yaml` 的解析对象 `AppConfig` 里引入了 `detection_mode` 设置项以取代单一的 LiDAR 聚类，目前支持 `lidar`, `mask`, 和 `roi` 三种模式串联流。
+- **保存中间过程调试图像**: 创建了专用的 `results/` 文件夹来收容所有的可视化输出结果。现在在执行 `fuse_mode` 融合作业时，系统会自动在合成最终图之前，将等比缩放且应用了对比度动态增强 Jet Colormap 的纯厚度视场图 (`rescaled_thickness_for_xx_fusion.jpg`) 以及依据选区参数裁切完毕的干净相机源图 (`cropped_xx_for_fusion.jpg`) 分别存入 `results/` 目录供对齐验证参考。
+- **Pipeline 分支处理**: 更新了 `app_pipeline.cpp` 中的 `executeDetectionAndFusion` 流程，现根据检测模式差异，系统分别自适应路由调用传统的 `detectByLidar` 或新加入的 `extractOresFromImage` 获取图像选区后交由 `detectByMask` / `detectByROI` 层处理获取点云子集，为跨传感器分割提供了统一网关。所有的基础地图输出也都已经被重定向到了 `results/` 目录。
+
+## 2026-02-28### 核心输出指标升级 (Core Output Metrics Upgrade)
 - **命令行补充点云分析**: 根据使用实际反馈与需求：
   1. 取消了在最终生成的各类厚度效果图上“强行叠加标出内部点云数量”的杂乱绘图行为，以保证视觉图谱本身只聚焦于矿石分布与厚度热力展现。
   2. 现在所有包含的点云统计信息（如：`Ore 1 [1250 pts]: Avg Thickness...`）被静默转入命令行标准输出 `std::cout`，确保系统终端留有详尽的数据记录供追溯。

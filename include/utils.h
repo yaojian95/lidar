@@ -20,6 +20,9 @@ struct AppConfig {
   bool visual_plane = true;
   bool enable_visualization = true;
 
+  // Detection Mode
+  std::string detection_mode = "lidar"; // lidar, roi, mask
+
   // Belt & Ground Properties
   float ground_threshold = 0.02f;
   float ground_filter_sigma = 6.0f;

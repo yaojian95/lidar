@@ -466,38 +466,143 @@ Ore OreAnalyzer::detectByROI(float min_x, float max_x, float min_y,
   return ore;
 }
 
-Ore OreAnalyzer::detectByMask(const std::vector<uint8_t> &mask, int width,
-                              int height, float mask_min_x, float mask_max_x,
-                              float mask_min_y, float mask_max_y) {
+Ore OreAnalyzer::detectByMask(const cv::Mat &mask, const ThicknessMap &map) {
   Ore ore;
   ore.id = "mask_ore";
   ore.point_indices.reset(new pcl::PointIndices);
 
-  float pixel_w = (mask_max_x - mask_min_x) / width;
-  float pixel_h = (mask_max_y - mask_min_y) / height;
+  if (mask.empty() || map.data.empty())
+    return ore;
+
+  // We have the physical bounds of the map (which is perfectly aligned with the
+  // crop boundaries). The user requested to map the 3D points directly to the
+  // `mask` dimensions (which is the visual image size), rather than resizing
+  // the mask down to the map resolution. This means the mask size represents
+  // the full range [map.min_x, map.max_x] and [map.max_y, map.min_y].
+
+  // Calculate physical width and height directly from the map's bounds.
+  // We can NOT use `map.width * map.resolution` anymore because if this map
+  // has passed through `alignThicknessMapToImage`, its `width` and `height`
+  // now represent the high-res image pixel dimensions, not the grid cells.
+  float map_phys_width = map.max_x - map.min_x;
+  float map_phys_height = map.max_y - map.min_y;
+
+  if (map_phys_width <= 0 || map_phys_height <= 0)
+    return ore;
 
   for (size_t i = 0; i < aligned_cloud_->size(); ++i) {
     const auto &pt = aligned_cloud_->points[i];
+    if (pt.z <= ground_threshold_)
+      continue;
 
-    // Map point to mask coordinates
-    int px = static_cast<int>((pt.x - mask_min_x) / pixel_w);
-    int py = static_cast<int>(
-        (pt.y - mask_min_y) /
-        pixel_h); // Assuming Y grows normally? Careful with image coords
+    // Relative position in [0, 1] across the cropped physical region
+    float rel_x = (pt.x - map.min_x) / map_phys_width;
+    float rel_y = (map.max_y - pt.y) / map_phys_height;
 
-    // Image coords usually Y down, physical Y usually up or down.
-    // Let's assume consistent orientation for simplicity, or user pre-flipped
-    // mask.
+    // Scale to the visual image (mask) pixel coordinates
+    // Transposed axes: Image Col (X) = Point Cloud Y
+    // Image Row (Y) = Point Cloud X
+    int mask_col = static_cast<int>(rel_y * mask.cols);
+    int mask_row = static_cast<int>(rel_x * mask.rows);
 
-    if (px >= 0 && px < width && py >= 0 && py < height) {
-      if (mask[py * width + px] > 0) { // Mask hit
-        if (pt.z > ground_threshold_) {
-          ore.point_indices->indices.push_back(i);
-        }
+    if (mask_row >= 0 && mask_row < mask.rows && mask_col >= 0 &&
+        mask_col < mask.cols) {
+      if (mask.at<uchar>(mask_row, mask_col) > 0) { // Mask hit
+        ore.point_indices->indices.push_back(i);
       }
     }
   }
   return ore;
+}
+
+std::vector<OreAnalyzer::ImageContour>
+OreAnalyzer::extractOresFromImage(const cv::Mat &image, const ThicknessMap &map,
+                                  FusionCrops lidar_crops, float unit_scale,
+                                  const cv::Mat &high_image) {
+  std::vector<ImageContour> results;
+  if (image.empty() || map.data.empty())
+    return results;
+
+  // The global ThicknessMap is now generated with `use_crops=true`,
+  // which means `map` is already cropped and dimensioned identically
+  // to the physical boundaries of the fusion region (`lidar_crops`).
+  // We just use the raw image contours as the mask directly!
+  // `detectByMask` will project the 3D points proportional to the `mask`'s
+  // sizes to detect them.
+
+  // 2. Prepare the Image
+  cv::Mat gray;
+  if (image.channels() == 3) {
+    cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+  } else {
+    gray = image.clone();
+  }
+
+  cv::Mat binary;
+  cv::threshold(gray, binary, 185, 255, cv::THRESH_BINARY_INV);
+
+  cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5));
+  cv::morphologyEx(binary, binary, cv::MORPH_OPEN, kernel);
+  cv::morphologyEx(binary, binary, cv::MORPH_CLOSE, kernel);
+
+  std::vector<std::vector<cv::Point>> contours;
+  cv::findContours(binary, contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
+
+  std::vector<std::vector<cv::Point>> valid_contours;
+
+  // 3. For each valid contour drawn on the image, we extract its mask
+  for (const auto &contour : contours) {
+    if (cv::contourArea(contour) < 100)
+      continue; // Filter noise
+
+    valid_contours.push_back(contour);
+
+    // Create a blank mask the same size as the image, and draw the single
+    // contour filled
+    cv::Mat single_contour_mask = cv::Mat::zeros(image.size(), CV_8UC1);
+    std::vector<std::vector<cv::Point>> single_contour_vec = {contour};
+    cv::drawContours(single_contour_mask, single_contour_vec, -1,
+                     cv::Scalar(255), cv::FILLED);
+
+    // We don't resize the mask anymore. We keep it at image dimensions.
+    ImageContour ic;
+    ic.mask = single_contour_mask;
+    results.push_back(ic);
+  }
+
+  // Save overlay image of extracted contours
+  if (!valid_contours.empty()) {
+    cv::Mat overlay = image.clone();
+    if (overlay.channels() == 1) {
+      cv::cvtColor(overlay, overlay, cv::COLOR_GRAY2BGR);
+    }
+    cv::drawContours(overlay, valid_contours, -1, cv::Scalar(0, 255, 0), 2);
+    cv::imwrite(
+        "E:/multi_source_info/lidar/results/extracted_contours_overlay_low.jpg",
+        overlay);
+    std::cout
+        << "Saved extracted contour overlay to: "
+           "E:/multi_source_info/lidar/results/extracted_contours_overlay_low.jpg"
+        << std::endl;
+
+    if (!high_image.empty()) {
+      cv::Mat overlay_high = high_image.clone();
+      if (overlay_high.channels() == 1) {
+        cv::cvtColor(overlay_high, overlay_high, cv::COLOR_GRAY2BGR);
+      }
+      cv::drawContours(overlay_high, valid_contours, -1, cv::Scalar(0, 0, 255),
+                       2);
+      cv::imwrite("E:/multi_source_info/lidar/results/"
+                  "extracted_contours_overlay_high.jpg",
+                  overlay_high);
+      std::cout << "Saved high-energy contour overlay to: "
+                   "E:/multi_source_info/lidar/results/"
+                   "extracted_contours_overlay_high.jpg"
+                << std::endl;
+    }
+  }
+
+  return results;
 }
 
 void OreAnalyzer::computeStats(Ore &ore, bool generate_map, float map_res) {
@@ -935,13 +1040,14 @@ void OreAnalyzer::filterGroundPoints() {
 
 OreAnalyzer::ThicknessMap
 OreAnalyzer::generateGlobalThicknessMap(const std::vector<Ore> &ores,
-                                        float resolution) {
+                                        float resolution, bool use_crops,
+                                        FusionCrops lidar_crops) {
   ThicknessMap map;
   map.resolution = resolution;
   map.width = 0;
   map.height = 0;
 
-  if (ores.empty() || unit_scale_ <= 0.000001f)
+  if (unit_scale_ <= 0.000001f)
     return map;
 
   // Convert physical resolution (meters) to point cloud units
@@ -949,50 +1055,63 @@ OreAnalyzer::generateGlobalThicknessMap(const std::vector<Ore> &ores,
   // X point cloud units = resolution / unit_scale_
   float resolution_raw = resolution / unit_scale_;
 
-  // 1. Determine Bounds based on DETECTED ORES only
-  // This avoids outliers in the rest of the cloud expanding the map to infinity
+  // 1. Determine Bounds
   float min_x = 1e9, max_x = -1e9;
   float min_y = 1e9, max_y = -1e9;
-
   bool points_found = false;
 
-  for (const auto &ore : ores) {
-    if (!ore.point_indices)
-      continue;
-    for (int idx : ore.point_indices->indices) {
-      const auto &pt = aligned_cloud_->points[idx];
-      if (pt.x < min_x)
-        min_x = pt.x;
-      if (pt.x > max_x)
-        max_x = pt.x;
-      if (pt.y < min_y)
-        min_y = pt.y;
-      if (pt.y > max_y)
-        max_y = pt.y;
-      points_found = true;
+  if (use_crops) {
+    // If crops are provided, explicitly compute the strict boundary box
+    computeCropBounds(lidar_crops, unit_scale_, min_x, max_x, min_y, max_y);
+    points_found = true;
+  } else if (!ores.empty()) {
+    // Determine Bounds based on DETECTED ORES only
+    for (const auto &ore : ores) {
+      if (!ore.point_indices)
+        continue;
+      for (int idx : ore.point_indices->indices) {
+        const auto &pt = aligned_cloud_->points[idx];
+        if (pt.x < min_x)
+          min_x = pt.x;
+        if (pt.x > max_x)
+          max_x = pt.x;
+        if (pt.y < min_y)
+          min_y = pt.y;
+        if (pt.y > max_y)
+          max_y = pt.y;
+        points_found = true;
+      }
+    }
+  } else {
+    // Use the entire aligned cloud above the ground threshold.
+    for (size_t i = 0; i < aligned_cloud_->size(); ++i) {
+      const auto &pt = aligned_cloud_->points[i];
+      if (pt.z > ground_threshold_) {
+        if (pt.x < min_x)
+          min_x = pt.x;
+        if (pt.x > max_x)
+          max_x = pt.x;
+        if (pt.y < min_y)
+          min_y = pt.y;
+        if (pt.y > max_y)
+          max_y = pt.y;
+        points_found = true;
+      }
     }
   }
 
-  if (!points_found)
+  if (!points_found || min_x >= max_x || min_y >= max_y)
     return map;
 
-  // Use Belt Boundaries for Y if available
-  if (belt_min_y_ > -1e8 && belt_max_y_ < 1e8) {
+  // Use Belt Boundaries for Y if available (only if not strictly overriden by
+  // crops)
+  if (!use_crops && belt_min_y_ > -1e8 && belt_max_y_ < 1e8) {
     min_y = belt_min_y_;
     max_y = belt_max_y_;
   }
 
-  // Add a small buffer (margin) logic
-  // Margin should be in raw units to keep image size reasonable
-  float margin_raw = resolution_raw * 5.0f; // 5 pixels margin
-
-  min_x -= margin_raw;
-  max_x += margin_raw;
-
-  if (belt_min_y_ <= -1e8 || belt_max_y_ >= 1e8) {
-    min_y -= margin_raw;
-    max_y += margin_raw;
-  }
+  // Removed 5-pixel margin to enforce strict alignment via crops.
+  // min_x and max_x strictly follow point cloud or user bounds.
 
   // Validate Dimensions
   int w = std::ceil((max_x - min_x) / resolution_raw);
@@ -1012,6 +1131,9 @@ OreAnalyzer::generateGlobalThicknessMap(const std::vector<Ore> &ores,
   map.height = h;
   map.min_x = min_x;
   map.max_y = max_y;
+  map.max_x = max_x;
+  map.min_y = min_y;
+  map.is_image_aligned = false;
 
   // Initialize with 0
   try {
@@ -1031,26 +1153,125 @@ OreAnalyzer::generateGlobalThicknessMap(const std::vector<Ore> &ores,
             << ", " << max_y << "]" << std::endl;
 
   // 2. Fill the map
-  for (const auto &ore : ores) {
-    if (!ore.point_indices)
-      continue;
-    for (int idx : ore.point_indices->indices) {
-      const auto &pt = aligned_cloud_->points[idx];
+  if (!ores.empty()) {
+    for (const auto &ore : ores) {
+      if (!ore.point_indices)
+        continue;
+      for (int idx : ore.point_indices->indices) {
+        const auto &pt = aligned_cloud_->points[idx];
 
-      int col = static_cast<int>((pt.x - min_x) / resolution_raw);
-      int row = static_cast<int>((max_y - pt.y) / resolution_raw);
+        int col = static_cast<int>((pt.x - min_x) / resolution_raw);
+        int row = static_cast<int>((max_y - pt.y) / resolution_raw);
 
-      if (col >= 0 && col < map.width && row >= 0 && row < map.height) {
-        float thick = pt.z * unit_scale_;
-        int index = row * map.width + col;
-        // Keep max thickness in cell
-        if (thick > map.data[index]) {
-          map.data[index] = thick;
+        if (col >= 0 && col < map.width && row >= 0 && row < map.height) {
+          float thick = pt.z * unit_scale_;
+          int index = row * map.width + col;
+          // Keep max thickness in cell
+          if (thick > map.data[index]) {
+            map.data[index] = thick;
+          }
+        }
+      }
+    }
+  } else {
+    // Fill from entire cloud above ground, BUT constrain it to the
+    // pre-calculated bounds
+    for (size_t i = 0; i < aligned_cloud_->size(); ++i) {
+      const auto &pt = aligned_cloud_->points[i];
+      if (pt.z > ground_threshold_ && pt.x >= min_x && pt.x <= max_x &&
+          pt.y >= min_y && pt.y <= max_y) {
+        int col = static_cast<int>((pt.x - min_x) / resolution_raw);
+        int row = static_cast<int>((max_y - pt.y) / resolution_raw);
+
+        if (col >= 0 && col < map.width && row >= 0 && row < map.height) {
+          float thick = pt.z * unit_scale_;
+          int index = row * map.width + col;
+          if (thick > map.data[index]) {
+            map.data[index] = thick;
+          }
         }
       }
     }
   }
+
+  std::cout << "Generated Global Thickness Map successfully." << std::endl;
   return map;
+}
+
+void OreAnalyzer::computeCropBounds(const FusionCrops &lidar_crops,
+                                    float unit_scale, float &roi_min_x,
+                                    float &roi_max_x, float &roi_min_y,
+                                    float &roi_max_y) {
+  if (!aligned_cloud_ || aligned_cloud_->empty()) {
+    std::cerr
+        << "Warning: Cannot compute crop bounds without an aligned point cloud."
+        << std::endl;
+    roi_min_x = roi_max_x = roi_min_y = roi_max_y = 0.0f;
+    return;
+  }
+
+  pcl::PointXYZ min_p, max_p;
+  pcl::getMinMax3D(*aligned_cloud_, min_p, max_p);
+
+  // 1. Determine base LiDAR bounds exactly as in generateGlobalThicknessMap
+  float base_min_x = min_p.x;
+  float base_max_x = max_p.x;
+  float base_min_y = belt_min_y_ > -1e8f ? belt_min_y_ : min_p.y;
+  float base_max_y = belt_max_y_ < 1e8f ? belt_max_y_ : max_p.y;
+
+  // Removed 5-pixel margin to enforce strict alignment via crops.
+  // Base bounds strictly follow point cloud or user bounds.
+
+  float resolution_raw = unit_scale > 1e-6f ? (0.01f / unit_scale)
+                                            : 1.0f; // assuming 0.01m map res
+
+  // 2. Apply LiDAR crop conversions to physical units
+  // Map Rows (col in un-transposed map) = Y in image = X in physical
+  // Map Cols (row in un-transposed map) = X in image = Y in physical
+  float phys_crop_up = lidar_crops.up * resolution_raw;
+  float phys_crop_down = lidar_crops.down * resolution_raw;
+  float phys_crop_left = lidar_crops.left * resolution_raw;
+  float phys_crop_right = lidar_crops.right * resolution_raw;
+
+  roi_min_x = base_min_x + phys_crop_down;
+  roi_max_x = base_max_x - phys_crop_up;
+  roi_min_y = base_min_y + phys_crop_right;
+  roi_max_y = base_max_y - phys_crop_left;
+}
+
+void OreAnalyzer::alignThicknessMapToImage(ThicknessMap &map,
+                                           cv::Size target_size) {
+  if (map.data.empty() || map.width <= 0 || map.height <= 0)
+    return;
+  if (target_size.width <= 0 || target_size.height <= 0)
+    return;
+
+  cv::Mat map_mat(map.height, map.width, CV_32FC1, map.data.data());
+
+  // Transpose to match Image/Camera Axes (where Image X maps to Map Y/Rows,
+  // Image Y maps to Map X/Cols)
+  cv::Mat transposed;
+  cv::transpose(map_mat, transposed);
+
+  // Resize to completely match the image resolution
+  cv::Mat resized;
+  cv::resize(transposed, resized, target_size, 0, 0, cv::INTER_LINEAR);
+
+  map.width = resized.cols;
+  map.height = resized.rows;
+
+  map.data.clear();
+  map.data.reserve(resized.total());
+  if (resized.isContinuous()) {
+    map.data.assign((float *)resized.datastart, (float *)resized.dataend);
+  } else {
+    for (int r = 0; r < resized.rows; ++r) {
+      map.data.insert(map.data.end(), resized.ptr<float>(r),
+                      resized.ptr<float>(r) + resized.cols);
+    }
+  }
+
+  map.is_image_aligned = true;
 }
 
 bool OreAnalyzer::saveThicknessMapToImage(const ThicknessMap &map,
@@ -1095,9 +1316,13 @@ bool OreAnalyzer::saveThicknessMapToImage(const ThicknessMap &map,
     }
   }
 
-  // Transpose the image as requested
+  // Transpose the image as requested, ONLY if it's not already image-aligned
   cv::Mat transposed_image;
-  cv::transpose(image, transposed_image);
+  if (map.is_image_aligned) {
+    transposed_image = image;
+  } else {
+    cv::transpose(image, transposed_image);
+  }
 
   // Convert grayscale to BGR if we need to draw colored text, or just draw
   // white text. Actually, to make text visible against white/black background,
@@ -1114,17 +1339,23 @@ bool OreAnalyzer::saveThicknessMapToImage(const ThicknessMap &map,
       float center_x = (ore.min_x + ore.max_x) / 2.0f;
       float center_y = (ore.min_y + ore.max_y) / 2.0f;
 
-      // Convert physical coordinates to pixel coordinates on the un-transposed
-      // map Note: map generation uses: col = (x - min_x) / res row = (max_y -
-      // y) / res
-      int map_c = static_cast<int>((center_x - map.min_x) / map.resolution);
-      int map_r = static_cast<int>((map.max_y - center_y) / map.resolution);
-
-      // After transpose, image metrics swap:
-      // transposed_row = map_c;
-      // transposed_col = map_r;
-      int img_r = map_c;
-      int img_c = map_r;
+      int img_r, img_c;
+      if (map.is_image_aligned) {
+        float map_phys_width = map.max_x - map.min_x;
+        float map_phys_height = map.max_y - map.min_y;
+        float rel_x = (center_x - map.min_x) / map_phys_width;
+        float rel_y = (map.max_y - center_y) / map_phys_height;
+        // Transposed axes interpretation:
+        // map X -> image rows (Y)
+        // map Y -> image cols (X)
+        img_r = static_cast<int>(rel_x * final_image.rows);
+        img_c = static_cast<int>(rel_y * final_image.cols);
+      } else {
+        int map_c = static_cast<int>((center_x - map.min_x) / map.resolution);
+        int map_r = static_cast<int>((map.max_y - center_y) / map.resolution);
+        img_r = map_c;
+        img_c = map_r;
+      }
 
       if (img_r >= 0 && img_r < final_image.rows && img_c >= 0 &&
           img_c < final_image.cols) {
@@ -1147,26 +1378,22 @@ bool OreAnalyzer::saveThicknessMapToImage(const ThicknessMap &map,
 
 // Fuse Thickness Map with RGB Image
 bool OreAnalyzer::fuseThicknessWithImage(const ThicknessMap &map,
-                                         const std::string &rgb_filename,
+                                         const cv::Mat &rgb_image_cropped,
                                          const std::string &output_filename,
-                                         int channel, FusionCrops rgb_crops,
-                                         FusionCrops lidar_crops,
+                                         int channel, FusionCrops lidar_crops,
                                          const std::vector<Ore> *ores) {
   if (map.data.empty() || map.width <= 0 || map.height <= 0) {
     std::cerr << "Error: Thickness map is empty." << std::endl;
     return false;
   }
 
-  // 1. Load RGB Image
-  cv::Mat rgb_image = cv::imread(rgb_filename);
-  if (rgb_image.empty()) {
-    std::cerr << "Error: Could not read RGB image from " << rgb_filename
-              << std::endl;
+  if (rgb_image_cropped.empty()) {
+    std::cerr << "Error: Pre-cropped RGB image is empty." << std::endl;
     return false;
   }
 
-  std::cout << "Loaded RGB Image: " << rgb_image.cols << "x" << rgb_image.rows
-            << std::endl;
+  std::cout << "Using pre-cropped RGB Image: " << rgb_image_cropped.cols << "x"
+            << rgb_image_cropped.rows << std::endl;
 
   // 2. Convert Thickness Map to CV Matrix
   // Original Map: Width x Height
@@ -1174,76 +1401,84 @@ bool OreAnalyzer::fuseThicknessWithImage(const ThicknessMap &map,
   // But saved thickness map was TRANSPOSED in saveThicknessMapToImage.
   // So the "aligned" orientation is the TRANSPOSED one.
 
-  // Let's reconstruct the map as we saved it (Transposed)
-  cv::Mat map_mat(map.height, map.width, CV_32FC1);
-  // Find max value for normalization
+  // 2. Prepare Resized Map
   float max_v = 0.0f;
   for (int r = 0; r < map.height; ++r) {
     for (int c = 0; c < map.width; ++c) {
-      float val = map.data[r * map.width + c];
-      if (val > max_v)
-        max_v = val;
-      map_mat.at<float>(r, c) = val;
+      if (map.data[r * map.width + c] > max_v)
+        max_v = map.data[r * map.width + c];
     }
   }
-
   if (max_v <= 0.000001f)
     max_v = 1.0f;
-  // Transpose to match the saved image (and thus the RGB image)
-  cv::Mat map_transposed;
-  cv::transpose(map_mat, map_transposed);
 
-  // 3. Define ROIs
-  // Source ROI (LiDAR Thickness Map)
-  cv::Rect src_roi(lidar_crops.left, lidar_crops.up,
-                   map_transposed.cols - lidar_crops.left - lidar_crops.right,
-                   map_transposed.rows - lidar_crops.up - lidar_crops.down);
-
-  // Target ROI (RGB Image)
-  cv::Rect tgt_roi(rgb_crops.left, rgb_crops.up,
-                   rgb_image.cols - rgb_crops.left - rgb_crops.right,
-                   rgb_image.rows - rgb_crops.up - rgb_crops.down);
-
-  // Validate ROIs
-  if (src_roi.width <= 0 || src_roi.height <= 0 || src_roi.x < 0 ||
-      src_roi.y < 0 || src_roi.x + src_roi.width > map_transposed.cols ||
-      src_roi.y + src_roi.height > map_transposed.rows) {
-    std::cerr
-        << "Error: Invalid LiDAR crops. Resulting ROI is invalid or empty."
-        << std::endl;
-    return false;
-  }
-  if (tgt_roi.width <= 0 || tgt_roi.height <= 0 || tgt_roi.x < 0 ||
-      tgt_roi.y < 0 || tgt_roi.x + tgt_roi.width > rgb_image.cols ||
-      tgt_roi.y + tgt_roi.height > rgb_image.rows) {
-    std::cerr << "Error: Invalid RGB crops. Resulting ROI is invalid or empty."
-              << std::endl;
-    return false;
-  }
-
-  // Crop Source
-  cv::Mat map_cropped = map_transposed(src_roi);
-
-  // Crop Target (RGB)
-  // We clone it so that the output image is physically smaller (just the ROI)
-  cv::Mat final_image = rgb_image(tgt_roi).clone();
-
-  // Resize Cropped Source to fit Target ROI
   cv::Mat map_resized;
-  cv::resize(map_cropped, map_resized, final_image.size(), 0, 0,
-             cv::INTER_LINEAR);
+  float scale_x = 1.0f, scale_y = 1.0f;
+  int src_offset_x = 0, src_offset_y = 0;
 
-  // Calculate Scale Factors for label mapping
-  float scale_x = static_cast<float>(final_image.cols) / map_cropped.cols;
-  float scale_y = static_cast<float>(final_image.rows) / map_cropped.rows;
+  cv::Mat final_image = rgb_image_cropped.clone();
 
-  std::cout << "Fusion ROI Alignment:" << std::endl;
-  std::cout << "  LiDAR ROI: " << src_roi.width << "x" << src_roi.height
-            << " (from " << map_transposed.cols << "x" << map_transposed.rows
-            << ")" << std::endl;
-  std::cout << "  RGB ROI:   " << tgt_roi.width << "x" << tgt_roi.height
-            << " (Target)" << std::endl;
-  std::cout << "  Scale:     x=" << scale_x << ", y=" << scale_y << std::endl;
+  if (map.is_image_aligned && map.width == final_image.cols &&
+      map.height == final_image.rows) {
+    map_resized = cv::Mat(map.height, map.width, CV_32FC1,
+                          const_cast<float *>(map.data.data()))
+                      .clone();
+    std::cout << "Fusion ROI Alignment: Direct 1:1 Pixel Mapping Used."
+              << std::endl;
+  } else {
+    cv::Mat map_mat(map.height, map.width, CV_32FC1,
+                    const_cast<float *>(map.data.data()));
+    cv::Mat map_transposed;
+    cv::transpose(map_mat, map_transposed);
+
+    float roi_min_x, roi_max_x, roi_min_y, roi_max_y;
+    computeCropBounds(lidar_crops, unit_scale_, roi_min_x, roi_max_x, roi_min_y,
+                      roi_max_y);
+
+    float resolution_raw = map.resolution / unit_scale_;
+    if (unit_scale_ <= 1e-6f)
+      resolution_raw = 1.0f;
+
+    int start_row = static_cast<int>((roi_min_x - map.min_x) / resolution_raw);
+    int end_row = static_cast<int>((roi_max_x - map.min_x) / resolution_raw);
+    int start_col = static_cast<int>((map.max_y - roi_max_y) / resolution_raw);
+    int end_col = static_cast<int>((map.max_y - roi_min_y) / resolution_raw);
+
+    cv::Rect src_roi(start_col, start_row, end_col - start_col,
+                     end_row - start_row);
+    if (src_roi.width <= 0 || src_roi.height <= 0 || src_roi.x < 0 ||
+        src_roi.y < 0 || src_roi.x + src_roi.width > map_transposed.cols ||
+        src_roi.y + src_roi.height > map_transposed.rows) {
+      std::cerr << "Error: Invalid LiDAR crops. Resulting ROI is invalid."
+                << std::endl;
+      return false;
+    }
+
+    src_offset_x = src_roi.x;
+    src_offset_y = src_roi.y;
+
+    cv::Mat map_cropped = map_transposed(src_roi);
+    cv::resize(map_cropped, map_resized, final_image.size(), 0, 0,
+               cv::INTER_LINEAR);
+
+    scale_x = static_cast<float>(final_image.cols) / map_cropped.cols;
+    scale_y = static_cast<float>(final_image.rows) / map_cropped.rows;
+
+    std::cout << "Fusion ROI Alignment calculated dynamically." << std::endl;
+  }
+
+  // Save intermediate images
+  cv::imwrite("E:/multi_source_info/lidar/results/cropped_rgb_for_fusion.jpg",
+              final_image);
+
+  // Visualize rescaled thickness map with Jet colormap
+  cv::Mat norm_map_resized;
+  map_resized.convertTo(norm_map_resized, CV_8UC1, 255.0 / max_v);
+  cv::Mat color_map_resized;
+  cv::applyColorMap(norm_map_resized, color_map_resized, cv::COLORMAP_JET);
+  cv::imwrite("E:/multi_source_info/lidar/results/"
+              "rescaled_thickness_for_rgb_fusion.jpg",
+              color_map_resized);
 
   // 4. Overlay
   if (channel < 0 || channel > 2)
@@ -1288,38 +1523,35 @@ bool OreAnalyzer::fuseThicknessWithImage(const ThicknessMap &map,
       float cx = (ore.min_x + ore.max_x) / 2.0f;
       float cy = (ore.min_y + ore.max_y) / 2.0f;
 
-      // Map to Map Grid (Original Map)
-      // Note: map.resolution is in METERS (e.g. 0.01), but the grid is built in
-      // RAW UNITS. We need to recover resolution_raw used during generation.
-      // resolution_raw = resolution / unit_scale_
-      float resolution_raw = map.resolution / unit_scale_;
-      if (unit_scale_ <= 1e-6f)
-        resolution_raw = 1.0f; // Safety
+      int rgb_r, rgb_c;
+      if (map.is_image_aligned && map.width == final_image.cols &&
+          map.height == final_image.rows) {
+        float map_phys_width = map.max_x - map.min_x;
+        float map_phys_height = map.max_y - map.min_y;
+        float rel_x = (cx - map.min_x) / map_phys_width;
+        float rel_y = (map.max_y - cy) / map_phys_height;
+        // Transposed axes interpretation:
+        // map X -> image rows (Y)
+        // map Y -> image cols (X)
+        rgb_r = static_cast<int>(rel_x * final_image.rows);
+        rgb_c = static_cast<int>(rel_y * final_image.cols);
+      } else {
+        float resolution_raw = map.resolution / unit_scale_;
+        if (unit_scale_ <= 1e-6f)
+          resolution_raw = 1.0f;
 
-      // col = (cx - min_x) / res_raw
-      // row = (max_y - cy) / res_raw
-      int col_map = static_cast<int>((cx - map.min_x) / resolution_raw);
-      int row_map = static_cast<int>((map.max_y - cy) / resolution_raw);
+        int col_map = static_cast<int>((cx - map.min_x) / resolution_raw);
+        int row_map = static_cast<int>((map.max_y - cy) / resolution_raw);
 
-      // Logic for map_transposed:
-      // map_mat(row_map, col_map) maps to map_transposed(col_map, row_map)
-      // So in transposed image: row index is col_map, col index is row_map.
-      int r_trans = col_map;
-      int c_trans = row_map;
+        int r_trans = col_map;
+        int c_trans = row_map;
 
-      // Apply Source Crop Offset
-      // The point must be inside the source ROI to be visible
-      int r_cropped = r_trans - src_roi.y;
-      int c_cropped = c_trans - src_roi.x;
+        int r_cropped = r_trans - src_offset_y;
+        int c_cropped = c_trans - src_offset_x;
 
-      // Scale to Target ROI
-      int r_scaled = static_cast<int>(r_cropped * scale_y);
-      int c_scaled = static_cast<int>(c_cropped * scale_x);
-
-      // Apply Target ROI Offset (Position in RGB)
-      // Since final_image IS the ROI, the offset is 0 relative to it.
-      int rgb_r = r_scaled;
-      int rgb_c = c_scaled;
+        rgb_r = static_cast<int>(r_cropped * scale_y);
+        rgb_c = static_cast<int>(c_cropped * scale_x);
+      }
 
       // Draw Text
       if (rgb_r >= 0 && rgb_r < final_image.rows && rgb_c >= 0 &&
@@ -1349,141 +1581,88 @@ bool OreAnalyzer::fuseThicknessWithImage(const ThicknessMap &map,
   }
 }
 
-bool OreAnalyzer::fuseThicknessWithXray(
-    const ThicknessMap &map, const std::string &xray_filename,
-    const std::string &output_filename, int cut_left, int cut_right,
-    bool enable_geometry_correction, float sod, float sdd,
-    FusionCrops xray_crops, FusionCrops lidar_crops,
-    const std::vector<Ore> *ores) {
+bool OreAnalyzer::fuseThicknessWithXray(const ThicknessMap &map,
+                                        const cv::Mat &xray_image_cropped,
+                                        const std::string &output_filename,
+                                        FusionCrops lidar_crops,
+                                        const std::vector<Ore> *ores) {
   if (map.data.empty() || map.width <= 0 || map.height <= 0) {
     std::cerr << "Error: Thickness map is empty." << std::endl;
     return false;
   }
 
-  // 1. Load X-ray Image (Grayscale)
-  cv::Mat xray_image = cv::imread(xray_filename, cv::IMREAD_GRAYSCALE);
-  if (xray_image.empty()) {
-    std::cerr << "Error: Could not read X-ray image from " << xray_filename
-              << std::endl;
+  if (xray_image_cropped.empty()) {
+    std::cerr << "Error: Pre-cropped X-ray image is empty." << std::endl;
     return false;
   }
 
-  std::cout << "Loaded X-ray Image: " << xray_image.cols << "x"
-            << xray_image.rows << std::endl;
-
-  // 2. Split (Left = Low Energy)
-  int mid = xray_image.cols / 2;
-  // Ensure mid is valid
-  if (mid <= 0)
-    return false;
-  cv::Mat low_energy = xray_image(cv::Rect(0, 0, mid, xray_image.rows));
-
-  // Flip horizontally as requested (original is mirrored)
-  cv::flip(low_energy, low_energy, 1);
-
-  // 3. Crop Low Energy
-  int new_width = mid - cut_left - cut_right;
-  if (new_width <= 0) {
-    std::cerr << "Error: X-ray cuts define invalid width (" << new_width << ")."
-              << std::endl;
-    return false;
-  }
-  // Validate cuts
-  if (cut_left < 0 || cut_right < 0 || cut_left + cut_right >= mid) {
-    std::cerr << "Error: Invalid X-ray cuts." << std::endl;
-    return false;
-  }
-
-  cv::Mat sliced_low =
-      low_energy(cv::Rect(cut_left, 0, new_width, low_energy.rows));
-
-  // 3b. Apply X-ray ROI Crops
-  // xray_crops are applied relative to the sliced_low image
-  int crop_width = sliced_low.cols - xray_crops.left - xray_crops.right;
-  int crop_height = sliced_low.rows - xray_crops.up - xray_crops.down;
-
-  if (crop_width <= 0 || crop_height <= 0) {
-    std::cerr << "Error: X-ray ROI crops result in empty image." << std::endl;
-    return false;
-  }
-
-  // Validate bounds
-  if (xray_crops.left < 0 || xray_crops.up < 0 ||
-      xray_crops.left + crop_width > sliced_low.cols ||
-      xray_crops.up + crop_height > sliced_low.rows) {
-    std::cerr << "Error: Invalid X-ray ROI crops." << std::endl;
-    return false;
-  }
-
-  cv::Mat cropped_xray = sliced_low(
-      cv::Rect(xray_crops.left, xray_crops.up, crop_width, crop_height));
-
-  // --- 3c. Apply Geometry Correction AFTER cropping ---
-  cv::Mat corrected_xray;
-  if (enable_geometry_correction && sod > 0.0f && sdd > 0.0f) {
-    if (Utils::correctXrayGeometry(cropped_xray, corrected_xray, sod, sdd)) {
-      std::cout << "Applied X-ray Geometry Correction (after crop)."
-                << std::endl;
-      std::cout << "  SOD: " << sod << " mm, SDD: " << sdd
-                << " mm, M: " << (sdd / sod) << std::endl;
-      std::cout << "  Corrected ROI size: " << corrected_xray.cols << "x"
-                << corrected_xray.rows << std::endl;
-    } else {
-      std::cout << "Skipping X-ray Geometry Correction: Execution failed."
-                << std::endl;
-      corrected_xray = cropped_xray;
-    }
-  } else {
-    std::cout << "Skipping X-ray Geometry Correction (disabled in config or "
-                 "invalid parameters)."
-              << std::endl;
-    corrected_xray = cropped_xray;
-  }
+  std::cout << "Using pre-cropped X-ray Image: " << xray_image_cropped.cols
+            << "x" << xray_image_cropped.rows << std::endl;
 
   // Clone to ensure contiguous memory and for conversion
-  cv::Mat final_image_gray = corrected_xray.clone();
+  cv::Mat final_image_gray = xray_image_cropped.clone();
   cv::Mat final_image;
   cv::cvtColor(final_image_gray, final_image, cv::COLOR_GRAY2BGR);
 
-  // 4. Prepare Thickness Map
-  cv::Mat map_mat(map.height, map.width, CV_32FC1);
+  // 4. Prepare Resized Map
   float max_v = 0.0f;
   for (int r = 0; r < map.height; ++r) {
     for (int c = 0; c < map.width; ++c) {
-      float val = map.data[r * map.width + c];
-      if (val > max_v)
-        max_v = val;
-      map_mat.at<float>(r, c) = val;
+      if (map.data[r * map.width + c] > max_v)
+        max_v = map.data[r * map.width + c];
     }
   }
-
   if (max_v <= 0.000001f)
     max_v = 1.0f;
 
-  // Transpose to match the saved image orientation
-  cv::Mat map_transposed;
-  cv::transpose(map_mat, map_transposed);
-
-  // 5. Crop LiDAR Map (Source ROI)
-  cv::Rect src_roi(lidar_crops.left, lidar_crops.up,
-                   map_transposed.cols - lidar_crops.left - lidar_crops.right,
-                   map_transposed.rows - lidar_crops.up - lidar_crops.down);
-
-  // Validate ROI
-  if (src_roi.width <= 0 || src_roi.height <= 0 || src_roi.x < 0 ||
-      src_roi.y < 0 || src_roi.x + src_roi.width > map_transposed.cols ||
-      src_roi.y + src_roi.height > map_transposed.rows) {
-    std::cerr << "Error: Invalid LiDAR crops for X-ray fusion." << std::endl;
-    return false;
-  }
-
-  cv::Mat map_cropped = map_transposed(src_roi);
-
-  // 6. Resize Map to Fit Sliced X-ray
-  // We assume the mapped area corresponds to the visible X-ray area after cuts.
   cv::Mat map_resized;
-  cv::resize(map_cropped, map_resized, final_image.size(), 0, 0,
-             cv::INTER_LINEAR);
+  float scale_x = 1.0f, scale_y = 1.0f;
+  int src_offset_x = 0, src_offset_y = 0;
+
+  if (map.is_image_aligned && map.width == final_image.cols &&
+      map.height == final_image.rows) {
+    map_resized = cv::Mat(map.height, map.width, CV_32FC1,
+                          const_cast<float *>(map.data.data()))
+                      .clone();
+    std::cout << "X-ray Fusion ROI Alignment: Direct 1:1 Pixel Mapping Used."
+              << std::endl;
+  } else {
+    cv::Mat map_mat(map.height, map.width, CV_32FC1,
+                    const_cast<float *>(map.data.data()));
+    cv::Mat map_transposed;
+    cv::transpose(map_mat, map_transposed);
+
+    float roi_min_x, roi_max_x, roi_min_y, roi_max_y;
+    computeCropBounds(lidar_crops, unit_scale_, roi_min_x, roi_max_x, roi_min_y,
+                      roi_max_y);
+
+    float resolution_raw = map.resolution / unit_scale_;
+    if (unit_scale_ <= 1e-6f)
+      resolution_raw = 1.0f;
+
+    int start_row = static_cast<int>((roi_min_x - map.min_x) / resolution_raw);
+    int end_row = static_cast<int>((roi_max_x - map.min_x) / resolution_raw);
+    int start_col = static_cast<int>((map.max_y - roi_max_y) / resolution_raw);
+    int end_col = static_cast<int>((map.max_y - roi_min_y) / resolution_raw);
+
+    cv::Rect src_roi(start_col, start_row, end_col - start_col,
+                     end_row - start_row);
+    if (src_roi.width <= 0 || src_roi.height <= 0 || src_roi.x < 0 ||
+        src_roi.y < 0 || src_roi.x + src_roi.width > map_transposed.cols ||
+        src_roi.y + src_roi.height > map_transposed.rows) {
+      std::cerr << "Error: Invalid LiDAR crops for X-ray fusion." << std::endl;
+      return false;
+    }
+
+    src_offset_x = src_roi.x;
+    src_offset_y = src_roi.y;
+    cv::Mat map_cropped = map_transposed(src_roi);
+    cv::resize(map_cropped, map_resized, final_image.size(), 0, 0,
+               cv::INTER_LINEAR);
+
+    scale_x = static_cast<float>(final_image.cols) / map_cropped.cols;
+    scale_y = static_cast<float>(final_image.rows) / map_cropped.rows;
+  }
 
   // 7. Apply Colormap and Overlay
   // Create a mask to only blend where thickness > 0
@@ -1538,6 +1717,11 @@ bool OreAnalyzer::fuseThicknessWithXray(
   cv::Mat color_map;
   cv::applyColorMap(norm_map, color_map, cv::COLORMAP_JET);
 
+  // Save intermediate visual thickness map
+  cv::imwrite("E:/multi_source_info/lidar/results/"
+              "rescaled_thickness_for_xray_fusion.jpg",
+              color_map);
+
   // Merge the colormap output with the X-ray RGB image using a mask and
   // blending
   float alpha = 0.8f; // Weight for the colormap
@@ -1561,12 +1745,6 @@ bool OreAnalyzer::fuseThicknessWithXray(
 
   // 8. Draw Labels
   if (ores) {
-    float scale_x = static_cast<float>(final_image.cols) / map_cropped.cols;
-    float scale_y = static_cast<float>(final_image.rows) / map_cropped.rows;
-    float resolution_raw = map.resolution / unit_scale_;
-    if (unit_scale_ <= 1e-6f)
-      resolution_raw = 1.0f;
-
     for (const auto &ore : *ores) {
       if (!ore.point_indices || ore.point_indices->indices.empty())
         continue;
@@ -1574,24 +1752,38 @@ bool OreAnalyzer::fuseThicknessWithXray(
       float cx = (ore.min_x + ore.max_x) / 2.0f;
       float cy = (ore.min_y + ore.max_y) / 2.0f;
 
-      int col_map = static_cast<int>((cx - map.min_x) / resolution_raw);
-      int row_map = static_cast<int>((map.max_y - cy) / resolution_raw);
+      int rgb_r, rgb_c;
+      if (map.is_image_aligned && map.width == final_image.cols &&
+          map.height == final_image.rows) {
+        float map_phys_width = map.max_x - map.min_x;
+        float map_phys_height = map.max_y - map.min_y;
+        float rel_x = (cx - map.min_x) / map_phys_width;
+        float rel_y = (map.max_y - cy) / map_phys_height;
+        // Transposed axes interpretation:
+        // map X -> image rows (Y)
+        // map Y -> image cols (X)
+        rgb_r = static_cast<int>(rel_x * final_image.rows);
+        rgb_c = static_cast<int>(rel_y * final_image.cols);
+      } else {
+        float resolution_raw = map.resolution / unit_scale_;
+        if (unit_scale_ <= 1e-6f)
+          resolution_raw = 1.0f;
 
-      // Transposed
-      int r_trans = col_map;
-      int c_trans = row_map;
+        int col_map = static_cast<int>((cx - map.min_x) / resolution_raw);
+        int row_map = static_cast<int>((map.max_y - cy) / resolution_raw);
 
-      // Crop
-      int r_cropped = r_trans - src_roi.y;
-      int c_cropped = c_trans - src_roi.x;
+        int r_trans = col_map;
+        int c_trans = row_map;
 
-      // Scale
-      int r_scaled = static_cast<int>(r_cropped * scale_y);
-      int c_scaled = static_cast<int>(c_cropped * scale_x);
+        int r_cropped = r_trans - src_offset_y;
+        int c_cropped = c_trans - src_offset_x;
 
-      int rgb_r = r_scaled;
+        rgb_r = static_cast<int>(r_cropped * scale_y);
+        rgb_c = static_cast<int>(c_cropped * scale_x);
+      }
+
       // Offset label slightly to the right so it doesn't obscure the center
-      int rgb_c = c_scaled + 40;
+      rgb_c += 40;
 
       if (rgb_r >= 0 && rgb_r < final_image.rows && rgb_c >= 0 &&
           rgb_c < final_image.cols) {

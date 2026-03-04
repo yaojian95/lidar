@@ -43,6 +43,8 @@ AppConfig Config::parseAppConfig(const YAML::Node &config) {
   app.belt_min_y = get<float>(config, "belt_min_y", -1e9f);
   app.belt_max_y = get<float>(config, "belt_max_y", 1e9f);
 
+  app.detection_mode = get<std::string>(config, "detection_mode", "lidar");
+
   app.cluster_tolerance = get<float>(config, "cluster_tolerance", 0.05f);
   app.min_cluster_size = get<int>(config, "min_cluster_size", 50);
   app.max_cluster_size = get<int>(config, "max_cluster_size", 50000);

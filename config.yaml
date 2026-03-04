@@ -1,7 +1,7 @@
 # pcd_path: "E:/multi_source_info/lidar/pcd_data/SaveData_4.ply"
 # pcd_path: "E:/multi_source_info/lidar/pcd_data/combined_cloud_0121.ply"
-pcd_path: "E:/multi_source_info/lidar/pcd_data/SaveData_contours_test_0227.ply"
-# pcd_path: "E:/multi_source_info/lidar/pcd_data/SaveData_0205_cropped.ply"
+# pcd_path: "E:/multi_source_info/lidar/pcd_data/SaveData_contours_test_0227.ply"
+pcd_path: "E:/multi_source_info/lidar/pcd_data/SaveData_0205_cropped.ply"
 unit_scale: 1.000000 # unit_scale: 3.527695 # unit_scale: 0.003375 # Conversion factor from point cloud units to physical meters. usage: physical_meters = point_cloud_unit * unit_scale
 # Plane detection options
 save_plane_equation: false  # If true, save detected plane to this file
@@ -22,6 +22,11 @@ ground_filter_sigma: 4.000000
 ground_filter_margin: 1.000000
 ground_threshold: 2.087664
 
+# Ore Detection Setting
+# Options: "lidar" (Point cloud clustering), "mask" (RGB/XRT mask extraction), "roi" (RGB/XRT ROI extraction)
+# detection_mode: "lidar"
+detection_mode: "mask"
+
 # Ore Detection (Euclidean Clustering)
 cluster_tolerance: 20.0 # Distance between points to be considered part of the same object (in point cloud units)
 min_cluster_size: 50    # Minimum number of points to form an ore chunk
@@ -35,7 +40,8 @@ rg_smoothness: 15.0 # Region Growing threshold in degrees (if normals change > X
 rg_curvature: 1.0 # Region Growing curvature threshold
 
 # Fusion Options
-# fuse: "xray"            # Options: "rgb", "xray", "false"
+# Options: "rgb", "xray", "false"
+fuse: "xray"            
 # fuse: "rgb"
 # fuse: false
 fusion_channel: 2      # 0: Blue, 1: Green, 2: Red
@@ -44,7 +50,7 @@ fusion_channel: 2      # 0: Blue, 1: Green, 2: Red
 xray_path: "E:/multi_source_info/lidar/pcd_data/20260205/xray_0p5ms-1.png"
 
 # X-ray Geometric Correction
-enable_xray_geometry_correction: false
+enable_xray_geometry_correction: true
 # M = sdd / sod. The image will be shrunk by 1/M.
 xray_sod: 40.0
 xray_sdd: 60.0
@@ -58,7 +64,7 @@ xray_crop_down: 270
 xray_crop_left: 0
 xray_crop_right: 0
 
-#aup and down means direction aligned with the betl
+#up and down means direction aligned with the betl
 #left and right means direction across the belt
 # RGB ROI Crops (Define the Valid Area on the RGB Image)
 rgb_crop_up: 690

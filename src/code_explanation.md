@@ -584,6 +584,36 @@ for (点云中的每个点 pt) {
 
 ---
 
+#### 4.5- **`extractOresFromImage(...)`**: 新增的两个重载提取方法。它们接收彩色 (`rgb`) 或灰度 (`xrt`) 图像和对应的物理坐标包围盒，将其转换为二值化遮罩矩阵，并通过 `cv::findContours` 提取轮廓区域内每个矿石碎片，最后将各碎片转化为附带基于图像像素尺寸计算得出的精确物理坐标框的新类型 `ImageContour` 的集合。
+- **`computeCropBounds(...)`**: 为了确保在 `app_pipeline.cpp` 中抓取图像选区(`ROI` 或 `mask`)和 `ore_analysis.cpp` 中将其与原始激光雷达点云图层（或直接用于厚度图与点云生成物理绑定映射）进行合成的两个流程中，拥有对于“基于 `lidar_crop_*` 和极值切分后的统一尺度”，提炼出的统一物理边界求解函数，该函数会计算和提供严丝合缝的 0 误差 5-pixel margin 同步的绝对物理 XY 范围。
+- **`ImageContour`**: 封装了从图像中提取的单体矿石轮廓特征的结构体，除了包含裁剪后的 8-bit 单通道二值化 `cv::Mat mask` 对象外，还保存有在全局物理地图中所处区域精确定位用的坐标变量 `phys_min_x/max_x/min_y/max_y` 和对应的像素级宽高。
+```cpp
+struct ImageContour {
+  std::vector<uint8_t> mask;
+  int width = 0;
+  int height = 0;
+  float phys_min_x = 0.0f, phys_max_x = 0.0f;
+  float phys_min_y = 0.0f, phys_max_y = 0.0f;
+};
+
+std::vector<ImageContour> OreAnalyzer::extractOresFromImage(
+    const cv::Mat& image, 
+    float phys_image_min_x, float phys_image_max_x, 
+    float phys_image_min_y, float phys_image_max_y
+) {
+```
+
+**实现逻辑**:
+1. **灰度与二值化**: `cv::cvtColor` 转灰度后，使用 `cv::threshold` (结合大津法 `cv::THRESH_OTSU`) 自动分离矿石与背景。
+2. **形态学去噪**: 使用椭圆结构核通过 `cv::morphologyEx` 执行开闭运算，消除孤立噪点并平滑边缘。
+3. **寻找轮廓**: `cv::findContours` 提取外层独立轮廓。
+4. **物理映射**: 根据传入的全局图像物理边界 (`phys_image_min_x` 等) 与图像总像素宽高比，线性插值出当前轮廓 `cv::boundingRect` 对应的专属局部物理坐标。
+5. **截取掩码**: 将轮廓外接矩形范围内的二值块抠出，展平存入 `std::vector<uint8_t>` 作为 `mask` 返回。
+
+**使用场景**: 融合模式下系统启用由图像主导的矿石分割，替代单纯的点云距离聚类。
+
+---
+
 #### 5. `computeStats()` - 厚度计算
 
 ```cpp
@@ -1086,3 +1116,23 @@ lidar_crop_left: 15 # 左侧裁剪掉 15 像素
 lidar_crop_right: 0
 ```
 
+```
+
+### 7.3 深度图全对齐与纯净图层 (Method 2 升级)
+
+在系统的演进中，为了实现完美无损且坐标一致的雷达-视觉融合，取消了传统的“在融合阶段强行推算并裁剪低清雷达图”的操作。取而代之的是采用 **全局前置全采样** 以及 **自适应扩充对齐 (alignThicknessMapToImage)** 策略。
+
+#### 执行流程与纯净图层 (`ores_thickness_map`)
+
+在 `app_pipeline.cpp` 的核心控制流中，关于深度图的生成与使用呈现出双保险和双用途的特色设计：
+
+1. **背景参考图 (`thickness_map`)**: 
+   - 率先生成覆盖整个传送带/ROI区域的物理底图。
+   - 这张图用来在随后的基于图像（Mask 检测）模式下，通过 `detectByMask` 直接被像素级读取，完成 2D 到 3D 的坐标逆映射寻找点云块。
+2. **纯净矿石图 (`ores_thickness_map`)**:
+   - 当检测算法（不论是纯 LiDAR 聚类，还是 Mask 反抠）执行完毕，并确认了当前帧所有的有效矿石实例 `std::vector<Ore> ores` 后，二次调用 `generateGlobalThicknessMap` 并仅仅传入被确认的 `ores` 对象列表。
+   - 这会形成一张等比大小，**但是背景和地面噪声全部被掏空**的纯净深度底图。
+3. **强制升维重塑 (`alignThicknessMapToImage`)**:
+   - 无论是第一张还是第二张底图，只要系统中启用了图像模态融合 (`fuse_mode=rgb|xray`)，这层点云深度图数据结构都会被强行转置并经过 `cv::resize`，**在像素数量和长宽方向上被拉伸得与高分辨率的高清相机照片一模一样**。
+4. **图像 1:1 融合**:
+   - 在进入 `fuseThicknessWithImage` 等融合渲染器时，它接收到的永远是被清洗过且被放大的 `ores_thickness_map`，而且具有与底层彩色图片一致的宽高和方向。这样整个 OpenCV 融合只剩下纯粹的矩阵贴图操作，从而彻底消除了过去复杂的转置与映射漂移 Bug，画面极为干净清晰。

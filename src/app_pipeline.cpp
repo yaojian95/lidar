@@ -154,19 +154,203 @@ bool processCalibrationAndGround(OreAnalyzer &analyzer, AppConfig &appConfig,
 
 void executeDetectionAndFusion(OreAnalyzer &analyzer,
                                const AppConfig &appConfig) {
-  std::cout << "Detecting ores with tolerance=" << appConfig.cluster_tolerance
-            << ", min_size=" << appConfig.min_cluster_size
-            << ", max_size=" << appConfig.max_cluster_size << "..."
-            << std::endl;
+  std::vector<Ore> ores;
+  std::string fuse_mode = appConfig.fuse_mode;
+  std::transform(fuse_mode.begin(), fuse_mode.end(), fuse_mode.begin(),
+                 ::tolower);
 
-  analyzer.setHybridClusteringConfig(
-      appConfig.cluster_strategy, appConfig.aspect_ratio_threshold,
-      appConfig.density_threshold, appConfig.rg_smoothness,
-      appConfig.rg_curvature);
+  cv::Mat fusion_target_image;
+  cv::Mat fusion_target_image_high;
 
-  auto ores = analyzer.detectByLidar(appConfig.cluster_tolerance,
-                                     appConfig.min_cluster_size,
-                                     appConfig.max_cluster_size);
+  if (fuse_mode == "rgb") {
+    std::string rgb_path =
+        "E:/multi_source_info/lidar/pcd_data/stitched_ore.jpg";
+    cv::Mat raw_img = cv::imread(rgb_path);
+    if (!raw_img.empty()) {
+      cv::Rect roi(
+          appConfig.rgb_crop_left, appConfig.rgb_crop_up,
+          raw_img.cols - appConfig.rgb_crop_left - appConfig.rgb_crop_right,
+          raw_img.rows - appConfig.rgb_crop_up - appConfig.rgb_crop_down);
+      if (roi.width > 0 && roi.height > 0 && roi.x >= 0 && roi.y >= 0 &&
+          roi.x + roi.width <= raw_img.cols &&
+          roi.y + roi.height <= raw_img.rows) {
+        fusion_target_image = raw_img(roi).clone();
+        std::cout << "Prepared RGB Image (" << fusion_target_image.cols << "x"
+                  << fusion_target_image.rows << ") from crops." << std::endl;
+      } else {
+        std::cerr << "Error: Invalid RGB crops resulted in empty image."
+                  << std::endl;
+      }
+    } else {
+      std::cerr << "Error: Could not read RGB image from " << rgb_path
+                << std::endl;
+    }
+  } else if (fuse_mode == "xray" && !appConfig.xray_path.empty()) {
+    cv::Mat raw_img = cv::imread(appConfig.xray_path, cv::IMREAD_GRAYSCALE);
+    if (!raw_img.empty()) {
+      int mid = raw_img.cols / 2;
+      if (mid > 0) {
+        cv::Mat low_energy = raw_img(cv::Rect(0, 0, mid, raw_img.rows));
+        cv::Mat high_energy =
+            raw_img(cv::Rect(mid, 0, raw_img.cols - mid, raw_img.rows));
+        cv::flip(low_energy, low_energy, 1);
+        cv::flip(high_energy, high_energy, 1);
+        int new_width =
+            mid - appConfig.xray_cut_left - appConfig.xray_cut_right;
+        if (new_width > 0 && appConfig.xray_cut_left >= 0 &&
+            appConfig.xray_cut_left + new_width <= low_energy.cols) {
+          cv::Mat sliced = low_energy(
+              cv::Rect(appConfig.xray_cut_left, 0, new_width, low_energy.rows));
+          cv::Mat sliced_high = high_energy(cv::Rect(
+              appConfig.xray_cut_left, 0, new_width, high_energy.rows));
+          cv::Rect roi(appConfig.xray_crop_left, appConfig.xray_crop_up,
+                       sliced.cols - appConfig.xray_crop_left -
+                           appConfig.xray_crop_right,
+                       sliced.rows - appConfig.xray_crop_up -
+                           appConfig.xray_crop_down);
+          if (roi.width > 0 && roi.height > 0 && roi.x >= 0 && roi.y >= 0 &&
+              roi.x + roi.width <= sliced.cols &&
+              roi.y + roi.height <= sliced.rows) {
+            cv::Mat cropped = sliced(roi);
+            cv::Mat cropped_high = sliced_high(roi);
+            if (appConfig.enable_xray_geometry_correction) {
+              bool low_corr = Utils::correctXrayGeometry(
+                  cropped, fusion_target_image, appConfig.xray_sod,
+                  appConfig.xray_sdd);
+              bool high_corr = Utils::correctXrayGeometry(
+                  cropped_high, fusion_target_image_high, appConfig.xray_sod,
+                  appConfig.xray_sdd);
+              if (low_corr && high_corr) {
+                std::cout << "Applied X-ray Geometry Correction to both images."
+                          << std::endl;
+              } else {
+                fusion_target_image = cropped.clone();
+                fusion_target_image_high = cropped_high.clone();
+              }
+            } else {
+              fusion_target_image = cropped.clone();
+              fusion_target_image_high = cropped_high.clone();
+            }
+            std::cout << "Prepared X-ray Image (" << fusion_target_image.cols
+                      << "x" << fusion_target_image.rows << ") from crops."
+                      << std::endl;
+
+            // Output Low and High-Energy images for fusion reference
+            cv::imwrite("E:/multi_source_info/lidar/results/"
+                        "cropped_xray_for_fusion_low.jpg",
+                        fusion_target_image);
+            cv::imwrite("E:/multi_source_info/lidar/results/"
+                        "cropped_xray_for_fusion_high.jpg",
+                        fusion_target_image_high);
+          } else {
+            std::cerr << "Error: Invalid X-ray ROI crops." << std::endl;
+          }
+        } else {
+          std::cerr << "Error: Invalid X-ray cuts." << std::endl;
+        }
+      }
+    } else {
+      std::cerr << "Error: Could not read X-ray image from "
+                << appConfig.xray_path << std::endl;
+    }
+  }
+
+  // 1. Generate Global Thickness Map FIRST (so we have a 1:1 map to work with
+  // for image masks) We pass an empty ores vector and `use_crops=true` to
+  // instruct generateGlobalThicknessMap to build it using strictly the point
+  // cloud area that matches the camera fusion ROI.
+
+  OreAnalyzer::FusionCrops lidar_crops{
+      appConfig.lidar_crop_up, appConfig.lidar_crop_down,
+      appConfig.lidar_crop_left, appConfig.lidar_crop_right};
+
+  std::cout << "Generating Cropped Global Thickness Map..." << std::endl;
+  auto thickness_map = analyzer.generateGlobalThicknessMap(
+      std::vector<Ore>{}, appConfig.unit_scale, true, lidar_crops);
+
+  // Resize Map to perfectly match visual image dimensions
+  if (!fusion_target_image.empty()) {
+    std::cout << "Aligning Thickness Map to Image Resolution ("
+              << fusion_target_image.cols << "x" << fusion_target_image.rows
+              << ")" << std::endl;
+    analyzer.alignThicknessMapToImage(thickness_map,
+                                      fusion_target_image.size());
+  }
+
+  std::string strategy_suffix =
+      (appConfig.detection_mode == "lidar")
+          ? "_strategy_" + std::to_string(appConfig.cluster_strategy)
+          : "_byMask";
+  std::string map_file = "E:/multi_source_info/lidar/results/thickness_map" +
+                         strategy_suffix + ".png";
+
+  if (appConfig.detection_mode == "lidar") {
+    std::cout << "Detecting ores with LiDAR clustering (tolerance="
+              << appConfig.cluster_tolerance
+              << ", min_size=" << appConfig.min_cluster_size
+              << ", max_size=" << appConfig.max_cluster_size << ")..."
+              << std::endl;
+
+    analyzer.setHybridClusteringConfig(
+        appConfig.cluster_strategy, appConfig.aspect_ratio_threshold,
+        appConfig.density_threshold, appConfig.rg_smoothness,
+        appConfig.rg_curvature);
+
+    ores = analyzer.detectByLidar(appConfig.cluster_tolerance,
+                                  appConfig.min_cluster_size,
+                                  appConfig.max_cluster_size);
+  } else if (appConfig.detection_mode == "mask" ||
+             appConfig.detection_mode == "roi") {
+    if (fuse_mode == "false") {
+      std::cerr << "Error: detection_mode " << appConfig.detection_mode
+                << " requires fuse_mode to be enabled ('rgb' or 'xray')."
+                << std::endl;
+      return;
+    }
+
+    if (fusion_target_image.empty()) {
+      std::cerr << "Error: Could not prepare image for detection. Checking "
+                   "config paths and crops."
+                << std::endl;
+      return;
+    }
+
+    std::cout << "Extracting ores from prepared image for "
+              << appConfig.detection_mode << " detection..." << std::endl;
+
+    std::cout
+        << "Extracting contours and mapping them directly to Thickness Map..."
+        << std::endl;
+
+    auto contours = analyzer.extractOresFromImage(
+        fusion_target_image, thickness_map, lidar_crops, appConfig.unit_scale,
+        fusion_target_image_high);
+
+    std::cout << "Extracted " << contours.size() << " contours from image."
+              << std::endl;
+
+    int ore_id = 0;
+    for (const auto &contour : contours) {
+      Ore ore;
+      if (appConfig.detection_mode == "mask") {
+        ore = analyzer.detectByMask(contour.mask, thickness_map);
+      } else { // roi
+        std::cerr << "roi detection mode is temporarily deprecated in Method 2 "
+                     "refactor."
+                  << std::endl;
+      }
+
+      if (ore.point_indices && !ore.point_indices->indices.empty()) {
+        ore.id = "ore_" + std::to_string(ore_id++);
+        ores.push_back(ore);
+      }
+    }
+  } else {
+    std::cerr << "Unknown detection_mode: " << appConfig.detection_mode
+              << std::endl;
+    return;
+  }
+
   std::cout << "Found " << ores.size() << " potential ore chunks." << std::endl;
 
   for (auto &ore : ores) {
@@ -178,66 +362,71 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
               << " (Max: " << ore.max_thickness << ")" << std::endl;
   }
 
-  std::cout << "Generating Global Thickness Map..." << std::endl;
-  auto thickness_map =
-      analyzer.generateGlobalThicknessMap(ores, appConfig.unit_scale);
-  std::string map_file =
-      "E:/multi_source_info/lidar/pcd_data/thickness_map_strategy_" +
-      std::to_string(appConfig.cluster_strategy) + ".png";
-
-  std::string fuse_mode = appConfig.fuse_mode;
-  std::transform(fuse_mode.begin(), fuse_mode.end(), fuse_mode.begin(),
-                 ::tolower);
-
   std::vector<Ore> *ores_ptr = (fuse_mode == "false") ? &ores : nullptr;
-
   if (analyzer.saveThicknessMapToImage(thickness_map, map_file, -1.0f,
                                        ores_ptr)) {
     std::cout << "Global Thickness Map saved to: " << map_file << std::endl;
   } else {
-    std::cerr << "Failed to save thickness map!" << std::endl;
+    std::cerr << "Failed to save global thickness map!" << std::endl;
+  }
+
+  std::cout << "Generating focused thickness map for detected ores only..."
+            << std::endl;
+  auto ores_thickness_map = analyzer.generateGlobalThicknessMap(
+      ores, appConfig.unit_scale, true, lidar_crops);
+
+  if (!fusion_target_image.empty()) {
+    std::cout << "Aligning Ores Thickness Map to Image Resolution ("
+              << fusion_target_image.cols << "x" << fusion_target_image.rows
+              << ")" << std::endl;
+    analyzer.alignThicknessMapToImage(ores_thickness_map,
+                                      fusion_target_image.size());
+  }
+
+  std::string ores_map_file =
+      "E:/multi_source_info/lidar/results/thickness_map_ores" +
+      strategy_suffix + ".png";
+
+  if (analyzer.saveThicknessMapToImage(ores_thickness_map, ores_map_file, -1.0f,
+                                       ores_ptr)) {
+    std::cout << "Ores Thickness Map saved to: " << ores_map_file << std::endl;
+  } else {
+    std::cerr << "Failed to save ores thickness map!" << std::endl;
   }
 
   if (fuse_mode == "rgb") {
-    OreAnalyzer::FusionCrops rgb_crops{
-        appConfig.rgb_crop_up, appConfig.rgb_crop_down, appConfig.rgb_crop_left,
-        appConfig.rgb_crop_right};
-    OreAnalyzer::FusionCrops lidar_crops{
-        appConfig.lidar_crop_up, appConfig.lidar_crop_down,
-        appConfig.lidar_crop_left, appConfig.lidar_crop_right};
-    std::string rgb_path =
-        "E:/multi_source_info/lidar/pcd_data/stitched_ore.jpg";
     std::string fused_path =
-        "E:/multi_source_info/lidar/pcd_data/fused_thickness_strategy_" +
-        std::to_string(appConfig.cluster_strategy) + ".jpg";
+        "E:/multi_source_info/lidar/results/fused_thickness" + strategy_suffix +
+        ".jpg";
 
-    std::cout << "Fusing thickness map with RGB image..." << std::endl;
-    if (analyzer.fuseThicknessWithImage(thickness_map, rgb_path, fused_path,
-                                        appConfig.fusion_channel, rgb_crops,
-                                        lidar_crops, &ores)) {
+    std::cout << "Fusing ores thickness map with RGB image..." << std::endl;
+    if (fusion_target_image.empty()) {
+      std::cerr
+          << "Failed to fuse: RGB image was not properly loaded or cropped."
+          << std::endl;
+    } else if (analyzer.fuseThicknessWithImage(
+                   ores_thickness_map, fusion_target_image, fused_path,
+                   appConfig.fusion_channel, lidar_crops, &ores)) {
       std::cout << "Fused image saved to: " << fused_path << std::endl;
     } else {
       std::cerr << "Failed to fuse thickness map with RGB image." << std::endl;
     }
   } else if (fuse_mode == "xray") {
     if (!appConfig.xray_path.empty()) {
-      OreAnalyzer::FusionCrops xray_crops{
-          appConfig.xray_crop_up, appConfig.xray_crop_down,
-          appConfig.xray_crop_left, appConfig.xray_crop_right};
-      OreAnalyzer::FusionCrops lidar_crops{
-          appConfig.lidar_crop_up, appConfig.lidar_crop_down,
-          appConfig.lidar_crop_left, appConfig.lidar_crop_right};
       std::string fused_xray_path =
-          "E:/multi_source_info/lidar/pcd_data/fused_thickness_xray_strategy_" +
-          std::to_string(appConfig.cluster_strategy) + ".jpg";
+          "E:/multi_source_info/lidar/results/fused_thickness_xray" +
+          strategy_suffix + ".jpg";
 
-      std::cout << "Fusing thickness map with X-ray image ("
+      std::cout << "Fusing ores thickness map with X-ray image ("
                 << appConfig.xray_path << ")..." << std::endl;
-      if (analyzer.fuseThicknessWithXray(
-              thickness_map, appConfig.xray_path, fused_xray_path,
-              appConfig.xray_cut_left, appConfig.xray_cut_right,
-              appConfig.enable_xray_geometry_correction, appConfig.xray_sod,
-              appConfig.xray_sdd, xray_crops, lidar_crops, &ores)) {
+
+      if (fusion_target_image.empty()) {
+        std::cerr << "Failed to fuse: X-ray image was not properly loaded, "
+                     "cropped, or corrected."
+                  << std::endl;
+      } else if (analyzer.fuseThicknessWithXray(
+                     ores_thickness_map, fusion_target_image, fused_xray_path,
+                     lidar_crops, &ores)) {
         std::cout << "Fused X-ray image saved to: " << fused_xray_path
                   << std::endl;
       } else {
