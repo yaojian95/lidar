@@ -64,10 +64,11 @@ max_cluster_size: 50000     # 最大点数
 
 **参数说明**:
 - `pcd_path`: 点云文件路径。
-- `unit_scale`: 物理单位转换系数。例如 `0.003375` 可能用于将特定传感器单位转换为米。
+- `unit_scale`: **核心物理缩放底数**。此参数仅负责将点云文件中记录的纯数值坐标`(x, y, z)`转换对齐至标准的**“米 (m)”**。例如，如果激光雷达记录点云的单位是毫米 (mm)，则必须严格配置 `0.001`（即 $1 mm \times 0.001 = 0.001 m$）。
 - `save_plane_equation`: **平面缓存开关**。`true` 表示保存检测结果，避免重复计算。
 - `plane_a/b/c/d`: 缓存的平面方程系数。
-- `belt_min_y`, `belt_max_y`: **皮带物理边界**。用于限制生成的厚度图的高度，确保图像与实地皮带宽度对应。
+- `belt_min_y`, `belt_max_y`: **皮带物理边界**。限定厚度图高度的绝对基准。注意其数值域是在**原生点云坐标系**（如 mm）内定义的。
+- `lidar_crop_up/down/left/right` (未展示在上方简略图中): **物理边缘裁切冗余量**。这些数值直接定义在点云的**原生物理坐标系单元**上（举例：如果设备原始数据是毫米，填 `150` 代表向内硬裁去 $150 mm$ 的物理空间）。裁切值直接以原生单位与点云包围盒边界做加减运算（不经过 `unit_scale` 换算），用于滤除处于皮带最外缘的检测噪点并限制厚度图画幅。
 - `cluster_tolerance`: **聚类容差**。判定两个点是否属于同一块矿石的距离阈值。
 - `min/max_cluster_size`: 矿石点数的有效范围，过滤噪声和过大误检。
 
@@ -585,7 +586,7 @@ for (点云中的每个点 pt) {
 ---
 
 #### 4.5- **`extractOresFromImage(...)`**: 新增的两个重载提取方法。它们接收彩色 (`rgb`) 或灰度 (`xrt`) 图像和对应的物理坐标包围盒，将其转换为二值化遮罩矩阵，并通过 `cv::findContours` 提取轮廓区域内每个矿石碎片，最后将各碎片转化为附带基于图像像素尺寸计算得出的精确物理坐标框的新类型 `ImageContour` 的集合。
-- **`computeCropBounds(...)`**: 为了确保在 `app_pipeline.cpp` 中抓取图像选区(`ROI` 或 `mask`)和 `ore_analysis.cpp` 中将其与原始激光雷达点云图层（或直接用于厚度图与点云生成物理绑定映射）进行合成的两个流程中，拥有对于“基于 `lidar_crop_*` 和极值切分后的统一尺度”，提炼出的统一物理边界求解函数，该函数会计算和提供严丝合缝的 0 误差 5-pixel margin 同步的绝对物理 XY 范围。
+- **`computeCropBounds(lidar_crops, roi_min_x, roi_max_x, roi_min_y, roi_max_y)`**: 统一物理边界求解函数。基于原始点云包围盒（`getMinMax3D`）和皮带边界（`belt_min/max_y`）计算基础范围，然后**直接以原生点云单位**（如 mm）施加 `lidar_crop_*` 裁切值（不经过 `unit_scale` 转换）。确保 `app_pipeline.cpp` 和 `ore_analysis.cpp` 中所有需要裁切边界的流程共用同一套精确的物理 XY 范围。
 - **`ImageContour`**: 封装了从图像中提取的单体矿石轮廓特征的结构体，除了包含裁剪后的 8-bit 单通道二值化 `cv::Mat mask` 对象外，还保存有在全局物理地图中所处区域精确定位用的坐标变量 `phys_min_x/max_x/min_y/max_y` 和对应的像素级宽高。
 ```cpp
 struct ImageContour {

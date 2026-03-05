@@ -220,7 +220,6 @@ private:
   // extraction and fusion. It takes into account the original LiDAR point cloud
   // extent, belt bounds, global thickness map resolution, 5-pixel safe margin,
   // and the user-specified LiDAR crops.
-  void computeCropBounds(const FusionCrops &lidar_crops, float unit_scale,
-                         float &roi_min_x, float &roi_max_x, float &roi_min_y,
-                         float &roi_max_y);
+  void computeCropBounds(const FusionCrops &lidar_crops, float &roi_min_x,
+                         float &roi_max_x, float &roi_min_y, float &roi_max_y);
 };

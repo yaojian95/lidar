@@ -580,10 +580,10 @@ OreAnalyzer::extractOresFromImage(const cv::Mat &image, const ThicknessMap &map,
     cv::imwrite(
         "E:/multi_source_info/lidar/results/extracted_contours_overlay_low.jpg",
         overlay);
-    std::cout
-        << "Saved extracted contour overlay to: "
-           "E:/multi_source_info/lidar/results/extracted_contours_overlay_low.jpg"
-        << std::endl;
+    std::cout << "Saved extracted contour overlay to: "
+                 "E:/multi_source_info/lidar/results/"
+                 "extracted_contours_overlay_low.jpg"
+              << std::endl;
 
     if (!high_image.empty()) {
       cv::Mat overlay_high = high_image.clone();
@@ -1062,7 +1062,7 @@ OreAnalyzer::generateGlobalThicknessMap(const std::vector<Ore> &ores,
 
   if (use_crops) {
     // If crops are provided, explicitly compute the strict boundary box
-    computeCropBounds(lidar_crops, unit_scale_, min_x, max_x, min_y, max_y);
+    computeCropBounds(lidar_crops, min_x, max_x, min_y, max_y);
     points_found = true;
   } else if (!ores.empty()) {
     // Determine Bounds based on DETECTED ORES only
@@ -1199,9 +1199,8 @@ OreAnalyzer::generateGlobalThicknessMap(const std::vector<Ore> &ores,
 }
 
 void OreAnalyzer::computeCropBounds(const FusionCrops &lidar_crops,
-                                    float unit_scale, float &roi_min_x,
-                                    float &roi_max_x, float &roi_min_y,
-                                    float &roi_max_y) {
+                                    float &roi_min_x, float &roi_max_x,
+                                    float &roi_min_y, float &roi_max_y) {
   if (!aligned_cloud_ || aligned_cloud_->empty()) {
     std::cerr
         << "Warning: Cannot compute crop bounds without an aligned point cloud."
@@ -1222,21 +1221,26 @@ void OreAnalyzer::computeCropBounds(const FusionCrops &lidar_crops,
   // Removed 5-pixel margin to enforce strict alignment via crops.
   // Base bounds strictly follow point cloud or user bounds.
 
-  float resolution_raw = unit_scale > 1e-6f ? (0.01f / unit_scale)
-                                            : 1.0f; // assuming 0.01m map res
-
-  // 2. Apply LiDAR crop conversions to physical units
+  // 2. Apply LiDAR crops directly in point cloud native units (no unit_scale
+  // conversion). The crop values and the base bounds (min_p, max_p, belt_*_y)
+  // are all in the same native coordinate system (e.g. mm).
   // Map Rows (col in un-transposed map) = Y in image = X in physical
   // Map Cols (row in un-transposed map) = X in image = Y in physical
-  float phys_crop_up = lidar_crops.up * resolution_raw;
-  float phys_crop_down = lidar_crops.down * resolution_raw;
-  float phys_crop_left = lidar_crops.left * resolution_raw;
-  float phys_crop_right = lidar_crops.right * resolution_raw;
 
-  roi_min_x = base_min_x + phys_crop_down;
-  roi_max_x = base_max_x - phys_crop_up;
-  roi_min_y = base_min_y + phys_crop_right;
-  roi_max_y = base_max_y - phys_crop_left;
+  // Apply crops to base bounds (all in native point cloud units)
+  // Point Cloud X corresponds to Image Up/Down (Y).
+  //  - 'down' cuts from min_x (bottom of image = smaller X)
+  //  - 'up' cuts from max_x (top of image = larger X)
+  roi_min_x = base_min_x + lidar_crops.down;
+  roi_max_x = base_max_x - lidar_crops.up;
+
+  // Point Cloud Y corresponds to Image Left/Right (X).
+  //  - 'right' cuts from min_y (right of image = smaller Y due to transpose
+  //  visual mapping)
+  //  - 'left' cuts from max_y (left of image = larger Y due to transpose visual
+  //  mapping)
+  roi_min_y = base_min_y + lidar_crops.right;
+  roi_max_y = base_max_y - lidar_crops.left;
 }
 
 void OreAnalyzer::alignThicknessMapToImage(ThicknessMap &map,
@@ -1432,8 +1436,7 @@ bool OreAnalyzer::fuseThicknessWithImage(const ThicknessMap &map,
     cv::transpose(map_mat, map_transposed);
 
     float roi_min_x, roi_max_x, roi_min_y, roi_max_y;
-    computeCropBounds(lidar_crops, unit_scale_, roi_min_x, roi_max_x, roi_min_y,
-                      roi_max_y);
+    computeCropBounds(lidar_crops, roi_min_x, roi_max_x, roi_min_y, roi_max_y);
 
     float resolution_raw = map.resolution / unit_scale_;
     if (unit_scale_ <= 1e-6f)
@@ -1633,8 +1636,7 @@ bool OreAnalyzer::fuseThicknessWithXray(const ThicknessMap &map,
     cv::transpose(map_mat, map_transposed);
 
     float roi_min_x, roi_max_x, roi_min_y, roi_max_y;
-    computeCropBounds(lidar_crops, unit_scale_, roi_min_x, roi_max_x, roi_min_y,
-                      roi_max_y);
+    computeCropBounds(lidar_crops, roi_min_x, roi_max_x, roi_min_y, roi_max_y);
 
     float resolution_raw = map.resolution / unit_scale_;
     if (unit_scale_ <= 1e-6f)

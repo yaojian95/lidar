@@ -1,3 +1,13 @@
+## 2026-03-05
+### 修复 `computeCropBounds` 裁切单位不匹配 Bug (Fix Crop Unit Mismatch)
+- **Bug 修复**: `computeCropBounds` 中 `lidar_crop_*` 值直接以原生点云单位参与运算，不再做 `unit_scale` 换算，修复了之前因 `unit_scale` 乘法导致裁切效果被缩小约 1000 倍的问题。
+- **接口简化**: 从 `computeCropBounds` 的函数签名中彻底移除了现在已不再使用的 `unit_scale` 参数（包括 `ore_analysis.h` 声明、`ore_analysis.cpp` 定义及全部 3 处调用点）。
+- **配置还原**: `config.yaml` 中 `lidar_crop_left/right` 从测试用 `150000` 恢复为合理的 `150` (mm)。
+
+### 点云物理尺度系重构与边缘裁切精度修正 (Point Cloud Physical Scaling & Crop Refactoring)
+- **精准的物理单位尺度对齐 (`unit_scale` 语义明确化)**: 彻底梳理了 `unit_scale` 的数学语义。修复了由于 `unit_scale: 1.0` 导致将点云设备输出的“毫米级”物理坐标强制误认为“米”，从而引发 `belt_min_y` (如 -478) 产生近一公里宽计算范围放大的严重逻辑偏移。明确规定：若原始点云单位为毫米(mm)，在系统内必须强制配置 `unit_scale: 0.001` 以统一向核心算法层的国际标准单位(米)对齐换算。
+- **裁切参数降维回归物理空间 (`lidar_crop` 物理化重构)**: 重构了 `OreAnalyzer::computeCropBounds` 的实现逻辑。现在配置文件中的 `lidar_crop_*` (如左/右/上/下) 参数不再被粗略等效于“生成的二维厚度图的像素网格数量 (`resolution_raw`)”；而是**被直接以原生点云坐标系单位回归为其在点云空间内的绝对物理数量差值**。例如：若原始点云单位为 mm，设置 `lidar_crop_left: 150` 即精确裁去左侧 150mm 的物理空间，彻底保证参数填写的直觉性与尺度鲁棒性。
+
 ## 2026-03-04
 ### 补全双能 X-ray (高能与低能) 同步坐标对齐及图像保存
 - **提取并保存高能 X 射线图像**: 完善了 X-ray 模式下的双能图片读取。现在引擎不仅从源图像的左半部分切割出低能图像，同时也从右半部分精准裁剪出高能图像。高能图像会同步经历翻转 (`flip`)、去废边 (`cut`)、ROI 裁切 (`crop`) 以及畸变矫正 (`correctXrayGeometry`)，最终被保存为 `results/cropped_xray_high_for_fusion.jpg` 供融合观测参考。

@@ -2,7 +2,7 @@
 # pcd_path: "E:/multi_source_info/lidar/pcd_data/combined_cloud_0121.ply"
 # pcd_path: "E:/multi_source_info/lidar/pcd_data/SaveData_contours_test_0227.ply"
 pcd_path: "E:/multi_source_info/lidar/pcd_data/SaveData_0205_cropped.ply"
-unit_scale: 1.000000 # unit_scale: 3.527695 # unit_scale: 0.003375 # Conversion factor from point cloud units to physical meters. usage: physical_meters = point_cloud_unit * unit_scale
+unit_scale: 0.001000 # unit_scale: 3.527695 # unit_scale: 0.003375 # Conversion factor from point cloud units to physical meters. usage: physical_meters = point_cloud_unit * unit_scale
 # Plane detection options
 save_plane_equation: false  # If true, save detected plane to this file
 visual_plane: true          # If true, visualize the ground plane in viewer
@@ -50,7 +50,7 @@ fusion_channel: 2      # 0: Blue, 1: Green, 2: Red
 xray_path: "E:/multi_source_info/lidar/pcd_data/20260205/xray_0p5ms-1.png"
 
 # X-ray Geometric Correction
-enable_xray_geometry_correction: true
+enable_xray_geometry_correction: false
 # M = sdd / sod. The image will be shrunk by 1/M.
 xray_sod: 40.0
 xray_sdd: 60.0
@@ -74,9 +74,10 @@ rgb_crop_right: 90
 
 # LiDAR ROI Crops (Define the Valid Area on the Thickness Map)
 # Use this to match the physical FOV of the RGB crop
+# same units with belt_min_y/max_y
 lidar_crop_up: 0
-lidar_crop_down: 3
-lidar_crop_left: 15
+lidar_crop_down: 0
+lidar_crop_left: 0
 lidar_crop_right: 0
 
 # Visualization
