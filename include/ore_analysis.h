@@ -183,6 +183,8 @@ public:
 
   float getBeltMinY() const { return belt_min_y_; }
   float getBeltMaxY() const { return belt_max_y_; }
+  float getBeltMinX() const { return belt_min_x_; }
+  float getBeltMaxX() const { return belt_max_x_; }
   void setBeltBoundaries(float min_y, float max_y) {
     belt_min_y_ = min_y;
     belt_max_y_ = max_y;
@@ -211,6 +213,10 @@ private:
   // Belt Boundaries (Y-axis)
   float belt_min_y_ = -1e9f;
   float belt_max_y_ = 1e9f;
+
+  // Belt Boundaries (X-axis / belt travel direction)
+  float belt_min_x_ = -1e9f;
+  float belt_max_x_ = 1e9f;
 
   // Ground Threshold Params
   float ground_sigma_ = 3.0f;

@@ -1,3 +1,8 @@
+## 2026-03-09
+### 修复厚度图 X 轴范围被隐式裁切至矿石区域 (Fix X-axis Implicit Crop to Ore Region)
+- **自动锚定 X 轴完整扫描范围**: 在 `filterGroundPoints` 执行地面点移除之前，自动调用 `getMinMax3D` 捕获并缓存完整点云的 X 轴极值至内部成员 `belt_min_x_` / `belt_max_x_`。修复了因地面过滤后 `aligned_cloud_` 仅剩矿石点，导致 `computeCropBounds` 中 X 方向的基底范围被隐式收缩至矿石覆盖区域的问题。
+- **`lidar_crop_up/down` 语义修正**: 现在 `lidar_crop_up` / `lidar_crop_down` 参数从**完整点云扫描长度**的两端向内裁切，而非从仅有矿石存在的狭小区间裁切，彻底恢复了用户对 X 轴裁切范围的直觉控制。无需在 `config.yaml` 中额外手动配置 X 轴边界。
+
 ## 2026-03-05
 ### 修复 `computeCropBounds` 裁切单位不匹配 Bug (Fix Crop Unit Mismatch)
 - **Bug 修复**: `computeCropBounds` 中 `lidar_crop_*` 值直接以原生点云单位参与运算，不再做 `unit_scale` 换算，修复了之前因 `unit_scale` 乘法导致裁切效果被缩小约 1000 倍的问题。

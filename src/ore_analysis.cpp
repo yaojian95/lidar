@@ -1016,6 +1016,21 @@ void OreAnalyzer::filterGroundPoints() {
   if (aligned_cloud_->empty())
     return;
 
+  // Capture full X-axis extent BEFORE ground filtering.
+  // After filtering, only ore points remain, which narrows the X range.
+  // We need the pre-filter range so that lidar_crop_up/down can trim from
+  // the full scan length rather than just the ore-occupied region.
+  if (belt_min_x_ < -1e8f || belt_max_x_ > 1e8f) {
+    pcl::PointXYZ pre_min, pre_max;
+    pcl::getMinMax3D(*aligned_cloud_, pre_min, pre_max);
+    if (belt_min_x_ < -1e8f)
+      belt_min_x_ = pre_min.x;
+    if (belt_max_x_ > 1e8f)
+      belt_max_x_ = pre_max.x;
+    std::cout << "Auto-captured Belt X Boundaries (pre-ground-filter): "
+              << belt_min_x_ << " to " << belt_max_x_ << std::endl;
+  }
+
   std::cout << "Filtering ground points (Z <= " << ground_threshold_ << ")..."
             << std::endl;
 
@@ -1213,8 +1228,8 @@ void OreAnalyzer::computeCropBounds(const FusionCrops &lidar_crops,
   pcl::getMinMax3D(*aligned_cloud_, min_p, max_p);
 
   // 1. Determine base LiDAR bounds exactly as in generateGlobalThicknessMap
-  float base_min_x = min_p.x;
-  float base_max_x = max_p.x;
+  float base_min_x = belt_min_x_ > -1e8f ? belt_min_x_ : min_p.x;
+  float base_max_x = belt_max_x_ < 1e8f ? belt_max_x_ : max_p.x;
   float base_min_y = belt_min_y_ > -1e8f ? belt_min_y_ : min_p.y;
   float base_max_y = belt_max_y_ < 1e8f ? belt_max_y_ : max_p.y;
 
