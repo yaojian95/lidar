@@ -1,4 +1,32 @@
+## 2026-03-12
+### 图像输出添加序号前缀 (Output Image Sequence Prefixing)
+- **为所有中间与最终输出图像添加序号前缀**：为了展示算法处理的先后顺序，在 `app_pipeline.cpp` 和 `ore_analysis.cpp` 中将保存到 `results/` 下的文件重命名。顺序如下：
+  1. `01/02_cropped_xray_for_fusion_low/high.jpg`
+  2. `03/04_extracted_contours_overlay_low/high.jpg`
+  3. `05_raw_thickness_map.tif`
+  4. `06_rescaled_thickness_map.tif`
+  5. `07_ores_thickness_map.tif`
+  6. `08_fused_thickness_xray...`
+
+### 厚度图流水线三阶段重构 (Thickness Map 3-Stage Pipeline Restructure)
+- **raw**: `05_raw_thickness_map.tif` — 原始网格分辨率、全部高于地面阈值的点、float32 TIFF、已 transpose 对齐 XRT 方向。
+- **rescaled**: `06_rescaled_thickness_map.tif` — raw resize 到 XRT 图像尺寸、float32 TIFF。
+- **ores**: `07_ores_thickness_map.tif` — rescaled 经 XRT 矿石轮廓 mask 过滤，仅保留矿石区域像素、float32 TIFF。
+- **删除冗余的第二次 `generateGlobalThicknessMap` 调用**：ores map 现在直接由 rescaled map + 合并轮廓掩码派生，不再重新生成。
+- **移除冗余 `pt.z > ground_threshold_` 检查**：`filterGroundPoints()` 已在早期阶段彻底删除地面点，后续循环无需再判断。
+- **厚度单位统一为毫米 (mm)**：所有 `pt.z * unit_scale_` 计算后乘以 `1000.0f`，终端输出添加 `mm` 标注。
+- **矿石排序**：mask 模式下按（从上到下、从左到右）行分组排序，使用中位数矿石高度作为行容差，重绘带编号的轮廓叠加图。
+
+
 ## 2026-03-09
+### 单矿石多模态 Patch 导出 (Per-Ore Multi-Modal Patch Export)
+- **新增 `saveOrePatches` 功能**: 在 `app_pipeline.cpp` 中实现了逐矿石导出 bounding box 级别的多模态数据切片。对每一块被检测到的矿石，系统会自动裁切并保存至 `results/ore_patches/` 目录下的 4 个同尺寸文件：
+  - `ore_N_thickness.tif`：**32-bit float TIFF**，保留完整浮点精度的厚度值，mask 外区域置零。
+  - `ore_N_mask.png`：**8-bit 二值掩码**，标识 bounding box 内哪些像素属于矿石本体。
+  - `ore_N_xrt_low.png`：低能 X 射线图像对应区域裁切。
+  - `ore_N_xrt_high.png`：高能 X 射线图像对应区域裁切。
+- **流程集成**: 在 pipeline 的 mask 检测循环中新增并行的 `ore_masks` 向量，精确追踪每块矿石与其图像轮廓掩码的对应关系。输出目录由 `std::filesystem::create_directories` 自动创建。
+
 ### 修复厚度图 X 轴范围被隐式裁切至矿石区域 (Fix X-axis Implicit Crop to Ore Region)
 - **自动锚定 X 轴完整扫描范围**: 在 `filterGroundPoints` 执行地面点移除之前，自动调用 `getMinMax3D` 捕获并缓存完整点云的 X 轴极值至内部成员 `belt_min_x_` / `belt_max_x_`。修复了因地面过滤后 `aligned_cloud_` 仅剩矿石点，导致 `computeCropBounds` 中 X 方向的基底范围被隐式收缩至矿石覆盖区域的问题。
 - **`lidar_crop_up/down` 语义修正**: 现在 `lidar_crop_up` / `lidar_crop_down` 参数从**完整点云扫描长度**的两端向内裁切，而非从仅有矿石存在的狭小区间裁切，彻底恢复了用户对 X 轴裁切范围的直觉控制。无需在 `config.yaml` 中额外手动配置 X 轴边界。

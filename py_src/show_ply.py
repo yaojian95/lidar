@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt
 import os
 # print(os.path.exists("E:/multi_source_info/lidar/pcd_data/SaveData_contours_test_0227.ply"))
 # pcd = o3d.io.read_point_cloud("E:/multi_source_info/lidar/pcd_data/pcd_data/combined_cloud_0121.ply")
-# pcd = o3d.io.read_point_cloud("E:/multi_source_info/lidar//pcd_data/SaveData_0205_cropped.ply")
-pcd = o3d.io.read_point_cloud("E:/multi_source_info/lidar/pcd_data/20260304_100_banyan_ores_xrt_pointcloud_data/SaveData_0304_banyan_1_50_cropped.ply")
+pcd = o3d.io.read_point_cloud("E:/multi_source_info/lidar//pcd_data/SaveData_3_test.ply")
+# pcd = o3d.io.read_point_cloud("E:/multi_source_info/lidar/pcd_data/20260304_100_banyan_ores_xrt_pointcloud_data/SaveData_0304_banyan_1_50_cropped.ply")
 # pcd = o3d.io.read_point_cloud("E:/multi_source_info/lidar/pcd_data/SaveData_contours_test_0227.ply")
 print(f"点数: {len(pcd.points)}")
 print(f"颜色: {'有' if pcd.has_colors() else '无'}")

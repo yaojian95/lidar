@@ -86,4 +86,9 @@ data/
 *.bin
 
 *.jpg
-# *.png
+*.png
+*.tif
+
+# CMakeLists.txt
+# CMakePresets.json
+# config.yaml

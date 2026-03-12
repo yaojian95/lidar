@@ -570,37 +570,8 @@ OreAnalyzer::extractOresFromImage(const cv::Mat &image, const ThicknessMap &map,
     results.push_back(ic);
   }
 
-  // Save overlay image of extracted contours
-  if (!valid_contours.empty()) {
-    cv::Mat overlay = image.clone();
-    if (overlay.channels() == 1) {
-      cv::cvtColor(overlay, overlay, cv::COLOR_GRAY2BGR);
-    }
-    cv::drawContours(overlay, valid_contours, -1, cv::Scalar(0, 255, 0), 2);
-    cv::imwrite(
-        "E:/multi_source_info/lidar/results/extracted_contours_overlay_low.jpg",
-        overlay);
-    std::cout << "Saved extracted contour overlay to: "
-                 "E:/multi_source_info/lidar/results/"
-                 "extracted_contours_overlay_low.jpg"
-              << std::endl;
-
-    if (!high_image.empty()) {
-      cv::Mat overlay_high = high_image.clone();
-      if (overlay_high.channels() == 1) {
-        cv::cvtColor(overlay_high, overlay_high, cv::COLOR_GRAY2BGR);
-      }
-      cv::drawContours(overlay_high, valid_contours, -1, cv::Scalar(0, 0, 255),
-                       2);
-      cv::imwrite("E:/multi_source_info/lidar/results/"
-                  "extracted_contours_overlay_high.jpg",
-                  overlay_high);
-      std::cout << "Saved high-energy contour overlay to: "
-                   "E:/multi_source_info/lidar/results/"
-                   "extracted_contours_overlay_high.jpg"
-                << std::endl;
-    }
-  }
+  // Note: Contour overlay drawing and saving has been moved to app_pipeline.cpp
+  // (as 03/04_extracted_contours_overlay) so they can reflect sorted Ore IDs.
 
   return results;
 }
@@ -618,8 +589,8 @@ void OreAnalyzer::computeStats(Ore &ore, bool generate_map, float map_res) {
     float z = aligned_cloud_->points[idx].z;
     const auto &pt = aligned_cloud_->points[idx];
 
-    // Convert to physical units
-    float physical_z = z * unit_scale_;
+    // Convert to physical units (millimeters)
+    float physical_z = z * unit_scale_ * 1000.0f;
 
     sum_z += physical_z;
     if (physical_z > max_z)
@@ -665,7 +636,7 @@ void OreAnalyzer::computeStats(Ore &ore, bool generate_map, float map_res) {
     int col = (pt.x - min_x) / map_res;
     int row = (pt.y - min_y) / map_res;
     if (col >= 0 && col < w && row >= 0 && row < h) {
-      cell_sums[row][col] += (pt.z * unit_scale_);
+      cell_sums[row][col] += (pt.z * unit_scale_ * 1000.0f);
       cell_counts[row][col]++;
     }
   }
@@ -1098,20 +1069,18 @@ OreAnalyzer::generateGlobalThicknessMap(const std::vector<Ore> &ores,
       }
     }
   } else {
-    // Use the entire aligned cloud above the ground threshold.
+    // Use the entire aligned cloud (ground points already filtered)
     for (size_t i = 0; i < aligned_cloud_->size(); ++i) {
       const auto &pt = aligned_cloud_->points[i];
-      if (pt.z > ground_threshold_) {
-        if (pt.x < min_x)
-          min_x = pt.x;
-        if (pt.x > max_x)
-          max_x = pt.x;
-        if (pt.y < min_y)
-          min_y = pt.y;
-        if (pt.y > max_y)
-          max_y = pt.y;
-        points_found = true;
-      }
+      if (pt.x < min_x)
+        min_x = pt.x;
+      if (pt.x > max_x)
+        max_x = pt.x;
+      if (pt.y < min_y)
+        min_y = pt.y;
+      if (pt.y > max_y)
+        max_y = pt.y;
+      points_found = true;
     }
   }
 
@@ -1179,7 +1148,7 @@ OreAnalyzer::generateGlobalThicknessMap(const std::vector<Ore> &ores,
         int row = static_cast<int>((max_y - pt.y) / resolution_raw);
 
         if (col >= 0 && col < map.width && row >= 0 && row < map.height) {
-          float thick = pt.z * unit_scale_;
+          float thick = pt.z * unit_scale_ * 1000.0f;
           int index = row * map.width + col;
           // Keep max thickness in cell
           if (thick > map.data[index]) {
@@ -1189,17 +1158,16 @@ OreAnalyzer::generateGlobalThicknessMap(const std::vector<Ore> &ores,
       }
     }
   } else {
-    // Fill from entire cloud above ground, BUT constrain it to the
-    // pre-calculated bounds
+    // Fill from entire cloud, constrain to pre-calculated bounds
+    // (ground points already removed by filterGroundPoints)
     for (size_t i = 0; i < aligned_cloud_->size(); ++i) {
       const auto &pt = aligned_cloud_->points[i];
-      if (pt.z > ground_threshold_ && pt.x >= min_x && pt.x <= max_x &&
-          pt.y >= min_y && pt.y <= max_y) {
+      if (pt.x >= min_x && pt.x <= max_x && pt.y >= min_y && pt.y <= max_y) {
         int col = static_cast<int>((pt.x - min_x) / resolution_raw);
         int row = static_cast<int>((max_y - pt.y) / resolution_raw);
 
         if (col >= 0 && col < map.width && row >= 0 && row < map.height) {
-          float thick = pt.z * unit_scale_;
+          float thick = pt.z * unit_scale_ * 1000.0f;
           int index = row * map.width + col;
           if (thick > map.data[index]) {
             map.data[index] = thick;
@@ -1486,8 +1454,9 @@ bool OreAnalyzer::fuseThicknessWithImage(const ThicknessMap &map,
   }
 
   // Save intermediate images
-  cv::imwrite("E:/multi_source_info/lidar/results/cropped_rgb_for_fusion.jpg",
-              final_image);
+  cv::imwrite(
+      "E:/multi_source_info/lidar/results/01_cropped_rgb_for_fusion.jpg",
+      final_image);
 
   // Visualize rescaled thickness map with Jet colormap
   cv::Mat norm_map_resized;
@@ -1495,7 +1464,7 @@ bool OreAnalyzer::fuseThicknessWithImage(const ThicknessMap &map,
   cv::Mat color_map_resized;
   cv::applyColorMap(norm_map_resized, color_map_resized, cv::COLORMAP_JET);
   cv::imwrite("E:/multi_source_info/lidar/results/"
-              "rescaled_thickness_for_rgb_fusion.jpg",
+              "04_rescaled_thickness_for_rgb_fusion.jpg",
               color_map_resized);
 
   // 4. Overlay
@@ -1733,11 +1702,6 @@ bool OreAnalyzer::fuseThicknessWithXray(const ThicknessMap &map,
   // Apply Jet Colormap
   cv::Mat color_map;
   cv::applyColorMap(norm_map, color_map, cv::COLORMAP_JET);
-
-  // Save intermediate visual thickness map
-  cv::imwrite("E:/multi_source_info/lidar/results/"
-              "rescaled_thickness_for_xray_fusion.jpg",
-              color_map);
 
   // Merge the colormap output with the X-ray RGB image using a mask and
   // blending

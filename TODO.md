@@ -1,6 +1,6 @@
 ## 0306
 - [ ] lidar crop up and thickness top?
-- [ ] reside point cloud data?
+- [ ] resize point cloud data?
 ## 03-03
 - [ ] 复杂度分析
 - [ ] 图片用异步保存？
