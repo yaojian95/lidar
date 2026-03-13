@@ -15,10 +15,15 @@ bool correctXrayGeometry(const cv::Mat &input_image, cv::Mat &output_image,
 struct AppConfig {
   // General & Point Cloud
   std::string pcd_path = "";
+  std::string results_dir = "E:/multi_source_info/lidar/results";
   float unit_scale = 1.0f;
   bool save_plane = false;
   bool visual_plane = true;
   bool enable_visualization = true;
+
+  // Thickness Map
+  float thickness_map_resolution =
+      0.01f; // Target resolution for the 2D map in meters
 
   // Detection Mode
   std::string detection_mode = "lidar"; // lidar, roi, mask

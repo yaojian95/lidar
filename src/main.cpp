@@ -1,6 +1,7 @@
 #include "app_pipeline.h"
 #include "ore_analysis.h"
 #include "utils.h"
+#include <filesystem>
 #include <iostream>
 
 
@@ -12,6 +13,17 @@ int main() {
     return -1;
   }
   AppConfig config = Config::parseAppConfig(raw_yaml);
+
+  // Auto-create results directories
+  try {
+    std::filesystem::create_directories(config.results_dir);
+    std::filesystem::create_directories(config.results_dir + "/ore_patches");
+    std::cout << "Ensured results directory exists: " << config.results_dir
+              << std::endl;
+  } catch (const std::exception &e) {
+    std::cerr << "Warning: Failed to create results directories: " << e.what()
+              << std::endl;
+  }
 
   // 2. Load Point Cloud
   auto cloud = AppPipeline::loadPointCloud(config.pcd_path);

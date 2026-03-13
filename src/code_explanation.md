@@ -60,11 +60,15 @@ fit_belt_edges: false       # 是否自动拟合皮带边缘
 cluster_tolerance: 20.0     # 聚类距离阈值
 min_cluster_size: 50        # 最小点数
 max_cluster_size: 50000     # 最大点数
+
+# 其他可选设置
+thickness_map_resolution: 0.01 # 全局厚度图输出分辨率（米/像素）
 ```
 
 **参数说明**:
 - `pcd_path`: 点云文件路径。
 - `unit_scale`: **核心物理缩放底数**。此参数仅负责将点云文件中记录的纯数值坐标`(x, y, z)`转换对齐至标准的**“米 (m)”**。例如，如果激光雷达记录点云的单位是毫米 (mm)，则必须严格配置 `0.001`（即 $1 mm \times 0.001 = 0.001 m$）。
+- `thickness_map_resolution`: **全局厚度图网格分辨率**。决定输出 `thickness_map` 的物理精度。例如 `0.01` 代表出图时每像素代表实际物理空间中的 1 厘米。与 `unit_scale` 解耦独立控制，不影响点云实际转换计算。
 - `save_plane_equation`: **平面缓存开关**。`true` 表示保存检测结果，避免重复计算。
 - `plane_a/b/c/d`: 缓存的平面方程系数。
 - `belt_min_y`, `belt_max_y`: **皮带物理边界**。限定厚度图高度的绝对基准。注意其数值域是在**原生点云坐标系**（如 mm）内定义的。

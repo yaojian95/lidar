@@ -15,6 +15,8 @@ struct Ore {
   // Stats
   float avg_thickness = 0.0f;
   float max_thickness = 0.0f;
+  float min_thickness = 1e9f;
+  float std_thickness = 0.0f;
 
   // Physical bounding box (x, y)
   float min_x, max_x, min_y, max_y;

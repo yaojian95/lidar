@@ -31,6 +31,8 @@ AppConfig Config::parseAppConfig(const YAML::Node &config) {
     return app;
 
   app.pcd_path = get<std::string>(config, "pcd_path", "");
+  app.results_dir = get<std::string>(config, "results_dir",
+                                     "E:/multi_source_info/lidar/results");
   app.unit_scale = get<float>(config, "unit_scale", 1.0f);
   app.save_plane = get<bool>(config, "save_plane_equation", false);
   app.visual_plane = get<bool>(config, "visual_plane", true);
@@ -42,6 +44,9 @@ AppConfig Config::parseAppConfig(const YAML::Node &config) {
   app.fit_belt_edges = get<bool>(config, "fit_belt_edges", false);
   app.belt_min_y = get<float>(config, "belt_min_y", -1e9f);
   app.belt_max_y = get<float>(config, "belt_max_y", 1e9f);
+
+  app.thickness_map_resolution =
+      get<float>(config, "thickness_map_resolution", 0.01f);
 
   app.detection_mode = get<std::string>(config, "detection_mode", "lidar");
 

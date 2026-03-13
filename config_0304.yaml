@@ -1,18 +1,19 @@
-
-pcd_path: "E:/multi_source_info/lidar/pcd_data/20260309_banyan_detong_63/savedata_1_63_cropped.ply"
-results_dir: "E:/multi_source_info/lidar/results_0309_0p01"
-unit_scale: 0.001000 # Conversion factor from point cloud units to physical meters. usage: physical_meters = point_cloud_unit * unit_scale
-thickness_map_resolution: 0.01 # Target physical resolution of the generated 2D global thickness map in meters (e.g., 0.01 = 1 cm per pixel)
+# pcd_path: "E:/multi_source_info/lidar/pcd_data/SaveData_4.ply"
+# pcd_path: "E:/multi_source_info/lidar/pcd_data/combined_cloud_0121.ply"
+# pcd_path: "E:/multi_source_info/lidar/pcd_data/SaveData_contours_test_0227.ply"
+# pcd_path: "E:/multi_source_info/lidar/pcd_data/SaveData_0205_cropped.ply"
+pcd_path: "E:/multi_source_info/lidar/pcd_data/20260304_100_banyan_ores_xrt_pointcloud_data/SaveData_0304_banyan_1_50_cropped.ply"
+unit_scale: 0.001000 # unit_scale: 3.527695 # unit_scale: 0.003375 # Conversion factor from point cloud units to physical meters. usage: physical_meters = point_cloud_unit * unit_scale
 # Plane detection options
-save_plane_equation: true  # If true, save detected plane to this file
-visual_plane: false          # If true, visualize the ground plane in viewer
+save_plane_equation: false  # If true, save detected plane to this file
+visual_plane: false        # If true, visualize the ground plane in viewer
 
 # Plane equation (auto-filled if save_plane_equation=true, or manually set)
 # Format: ax + by + cz + d = 0
-plane_a: -0.000316
-plane_b: -0.008745
-plane_c: 0.999962
-plane_d: -925.519592
+plane_a: 0.000004
+plane_b: -0.008782
+plane_c: 0.999961
+plane_d: -927.410950
 
 fit_belt_edges: false # If true, detect and calibrate side panels. If false, use belt_min_y/max_y directly.
 belt_min_y: -478.056000
@@ -20,7 +21,7 @@ belt_max_y: 443.395081
 
 ground_filter_sigma: 4.000000
 ground_filter_margin: 1.000000
-ground_threshold: 2.080728
+ground_threshold: 2.087664
 
 # Ore Detection Setting
 # Options: "lidar" (Point cloud clustering), "mask" (RGB/XRT mask extraction), "roi" (RGB/XRT ROI extraction)
@@ -48,7 +49,7 @@ fusion_channel: 2      # 0: Blue, 1: Green, 2: Red
 
 # X-ray Parameters
 # xray_path: "E:/multi_source_info/lidar/pcd_data/20260205/xray_0p5ms-1.png"
-xray_path: "E:/multi_source_info/lidar/pcd_data/20260309_banyan_detong_63/banyan_Detong_1_63_347.png"  
+xray_path: "E:/multi_source_info/lidar/pcd_data/20260304_100_banyan_ores_xrt_pointcloud_data/1_50_xrt_48.png"  
 
 # X-ray Geometric Correction
 enable_xray_geometry_correction: false
@@ -60,10 +61,10 @@ xray_sdd: 60.0
 xray_cut_left: 130
 xray_cut_right: 120
 # X-ray ROI Crops (Applied after the cuts above)
-xray_crop_up: 0
-xray_crop_down: 0
-xray_crop_left: 10
-xray_crop_right: 20
+xray_crop_up: 330
+xray_crop_down: 340
+xray_crop_left: 0
+xray_crop_right: 0
 
 #up and down means direction aligned with the betl
 #left and right means direction across the belt
@@ -76,9 +77,8 @@ rgb_crop_right: 90
 # LiDAR ROI Crops (Define the Valid Area on the Thickness Map)
 # Use this to match the physical FOV of the RGB crop
 # same units with belt_min_y/max_y
-# down actually means up in the image
-lidar_crop_up: 60
-lidar_crop_down: 200
+lidar_crop_up: 0
+lidar_crop_down: 150
 lidar_crop_left: 0
 lidar_crop_right: 0
 

@@ -585,6 +585,12 @@ void OreAnalyzer::computeStats(Ore &ore, bool generate_map, float map_res) {
   float max_z = -1e9f;
   float min_x = 1e9f, max_x = -1e9f, min_y = 1e9f, max_y = -1e9f;
 
+  // Welford's online algorithm for computing variance in a single pass
+  size_t count = 0;
+  float mean = 0.0f;
+  float M2 = 0.0f;
+  float min_z = 1e9f;
+
   for (int idx : ore.point_indices->indices) {
     float z = aligned_cloud_->points[idx].z;
     const auto &pt = aligned_cloud_->points[idx];
@@ -595,6 +601,8 @@ void OreAnalyzer::computeStats(Ore &ore, bool generate_map, float map_res) {
     sum_z += physical_z;
     if (physical_z > max_z)
       max_z = physical_z;
+    if (physical_z < min_z)
+      min_z = physical_z;
 
     if (pt.x < min_x)
       min_x = pt.x;
@@ -604,10 +612,20 @@ void OreAnalyzer::computeStats(Ore &ore, bool generate_map, float map_res) {
       min_y = pt.y;
     if (pt.y > max_y)
       max_y = pt.y;
+
+    // Welford's update step
+    count++;
+    float delta = physical_z - mean;
+    mean += delta / count;
+    float delta2 = physical_z - mean;
+    M2 += delta * delta2;
   }
 
-  ore.avg_thickness = sum_z / ore.point_indices->indices.size();
+  ore.avg_thickness = count > 0 ? (sum_z / count) : 0.0f;
   ore.max_thickness = max_z;
+  ore.min_thickness = (min_z == 1e9f) ? 0.0f : min_z;
+  ore.std_thickness = count > 1 ? std::sqrt(M2 / count) : 0.0f;
+
   ore.min_x = min_x;
   ore.max_x = max_x;
   ore.min_y = min_y;
@@ -1029,7 +1047,8 @@ OreAnalyzer::generateGlobalThicknessMap(const std::vector<Ore> &ores,
                                         float resolution, bool use_crops,
                                         FusionCrops lidar_crops) {
   ThicknessMap map;
-  map.resolution = resolution;
+  map.resolution =
+      resolution; // physical resolution of the generated map (meters)
   map.width = 0;
   map.height = 0;
 
@@ -1097,7 +1116,8 @@ OreAnalyzer::generateGlobalThicknessMap(const std::vector<Ore> &ores,
   // Removed 5-pixel margin to enforce strict alignment via crops.
   // min_x and max_x strictly follow point cloud or user bounds.
 
-  // Validate Dimensions
+  // Validate Dimensions；
+  // number of points (of lidar point cloud) in the thickness map
   int w = std::ceil((max_x - min_x) / resolution_raw);
   int h = std::ceil((max_y - min_y) / resolution_raw);
 
@@ -1453,18 +1473,22 @@ bool OreAnalyzer::fuseThicknessWithImage(const ThicknessMap &map,
     std::cout << "Fusion ROI Alignment calculated dynamically." << std::endl;
   }
 
+  // Extract base directory from output_filename
+  std::string base_dir = "E:/multi_source_info/lidar/results";
+  size_t last_slash = output_filename.find_last_of("/\\");
+  if (last_slash != std::string::npos) {
+    base_dir = output_filename.substr(0, last_slash);
+  }
+
   // Save intermediate images
-  cv::imwrite(
-      "E:/multi_source_info/lidar/results/01_cropped_rgb_for_fusion.jpg",
-      final_image);
+  cv::imwrite(base_dir + "/01_cropped_rgb_for_fusion.jpg", final_image);
 
   // Visualize rescaled thickness map with Jet colormap
   cv::Mat norm_map_resized;
   map_resized.convertTo(norm_map_resized, CV_8UC1, 255.0 / max_v);
   cv::Mat color_map_resized;
   cv::applyColorMap(norm_map_resized, color_map_resized, cv::COLORMAP_JET);
-  cv::imwrite("E:/multi_source_info/lidar/results/"
-              "04_rescaled_thickness_for_rgb_fusion.jpg",
+  cv::imwrite(base_dir + "/04_rescaled_thickness_for_rgb_fusion.jpg",
               color_map_resized);
 
   // 4. Overlay
@@ -1774,7 +1798,7 @@ bool OreAnalyzer::fuseThicknessWithXray(const ThicknessMap &map,
 
         // Use Green for text to contrast with Red thickness
         cv::putText(final_image, label, cv::Point(rgb_c, rgb_r),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 0, 0), 1);
+                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 255), 1);
       }
     }
   }

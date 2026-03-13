@@ -314,11 +314,13 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
                       << std::endl;
 
             // Output Low and High-Energy images for fusion reference
-            if (cv::imwrite("E:/multi_source_info/lidar/results/"
-                            "01_cropped_xray_for_fusion_low.jpg",
+            if (cv::imwrite(appConfig.results_dir +
+                                "/"
+                                "01_cropped_xray_for_fusion_low.jpg",
                             fusion_target_image) &&
-                cv::imwrite("E:/multi_source_info/lidar/results/"
-                            "02_cropped_xray_for_fusion_high.jpg",
+                cv::imwrite(appConfig.results_dir +
+                                "/"
+                                "02_cropped_xray_for_fusion_high.jpg",
                             fusion_target_image_high)) {
               std::cout << "Saved pre-cropped X-ray images." << std::endl;
             }
@@ -382,9 +384,11 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
       appConfig.lidar_crop_up, appConfig.lidar_crop_down,
       appConfig.lidar_crop_left, appConfig.lidar_crop_right};
 
-  std::cout << "Generating Cropped Global Thickness Map..." << std::endl;
+  std::cout << "Generating Cropped Global Thickness Map (Resolution: "
+            << appConfig.thickness_map_resolution << "m)..." << std::endl;
   auto thickness_map = analyzer.generateGlobalThicknessMap(
-      std::vector<Ore>{}, appConfig.unit_scale, true, lidar_crops);
+      std::vector<Ore>{}, appConfig.thickness_map_resolution, true,
+      lidar_crops);
 
   std::string strategy_suffix =
       (appConfig.detection_mode == "lidar")
@@ -539,12 +543,14 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
                       0.6, cv::Scalar(0, 255, 255), 2);
       }
 
-      cv::imwrite("E:/multi_source_info/lidar/results/"
-                  "03_extracted_contours_overlay_low.jpg",
+      cv::imwrite(appConfig.results_dir +
+                      "/"
+                      "03_extracted_contours_overlay_low.jpg",
                   overlay_low);
       if (!overlay_high.empty())
-        cv::imwrite("E:/multi_source_info/lidar/results/"
-                    "04_extracted_contours_overlay_high.jpg",
+        cv::imwrite(appConfig.results_dir +
+                        "/"
+                        "04_extracted_contours_overlay_high.jpg",
                     overlay_high);
       std::cout << "Saved labeled contour overlays with sorted IDs."
                 << std::endl;
@@ -563,7 +569,9 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
         ore.point_indices ? ore.point_indices->indices.size() : 0;
     std::cout << "Ore " << ore.id << " [" << point_count
               << " pts]: Avg Thickness = " << ore.avg_thickness
-              << " mm (Max: " << ore.max_thickness << " mm)" << std::endl;
+              << " mm (Min: " << ore.min_thickness
+              << " mm, Max: " << ore.max_thickness
+              << " mm, Std: " << ore.std_thickness << " mm)" << std::endl;
   }
 
   // =====================================================================
@@ -576,8 +584,7 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
             .clone();
     cv::Mat raw_map_t;
     cv::transpose(raw_map, raw_map_t);
-    cv::imwrite("E:/multi_source_info/lidar/results/05_raw_thickness_map.tif",
-                raw_map_t);
+    cv::imwrite(appConfig.results_dir + "/05_raw_thickness_map.tif", raw_map_t);
     std::cout << "Stage 1 (Raw): saved (" << raw_map_t.cols << "x"
               << raw_map_t.rows << ")" << std::endl;
   }
@@ -600,9 +607,8 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
     rescaled_mat = cv::Mat(thickness_map.height, thickness_map.width, CV_32FC1,
                            const_cast<float *>(thickness_map.data.data()))
                        .clone();
-    cv::imwrite(
-        "E:/multi_source_info/lidar/results/06_rescaled_thickness_map.tif",
-        rescaled_mat);
+    cv::imwrite(appConfig.results_dir + "/06_rescaled_thickness_map.tif",
+                rescaled_mat);
     std::cout << "Stage 2 (Rescaled): saved (" << rescaled_mat.cols << "x"
               << rescaled_mat.rows << ")" << std::endl;
   }
@@ -624,15 +630,21 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
     // Zero out everything outside ore regions
     ores_mat.setTo(0.0f, combined_mask == 0);
 
-    cv::imwrite("E:/multi_source_info/lidar/results/07_ores_thickness_map.tif",
-                ores_mat);
+    // Update the ores_thickness_map structure with the zeroed-out data
+    if (ores_mat.isContinuous() &&
+        ores_mat.total() == ores_thickness_map.data.size()) {
+      std::memcpy(ores_thickness_map.data.data(), ores_mat.ptr<float>(),
+                  ores_thickness_map.data.size() * sizeof(float));
+    }
+
+    cv::imwrite(appConfig.results_dir + "/07_ores_thickness_map.tif", ores_mat);
     std::cout << "Stage 3 (Ores): saved (" << ores_mat.cols << "x"
               << ores_mat.rows << ")" << std::endl;
   }
 
   // Save per-ore patches (thickness, mask, low/high XRT)
   if (!ore_masks.empty() && !ores.empty()) {
-    std::string patches_dir = "E:/multi_source_info/lidar/results/ore_patches";
+    std::string patches_dir = appConfig.results_dir + "/ore_patches";
     std::cout << "Saving per-ore patches to " << patches_dir << "..."
               << std::endl;
     saveOrePatches(ores_thickness_map, ore_masks, ores, fusion_target_image,
@@ -640,9 +652,8 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
   }
 
   if (fuse_mode == "rgb") {
-    std::string fused_path =
-        "E:/multi_source_info/lidar/results/08_fused_thickness" +
-        strategy_suffix + ".jpg";
+    std::string fused_path = appConfig.results_dir + "/08_fused_thickness" +
+                             strategy_suffix + ".jpg";
 
     std::cout << "Fusing ores thickness map with RGB image..." << std::endl;
     if (fusion_target_image.empty()) {
@@ -658,9 +669,9 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
     }
   } else if (fuse_mode == "xray") {
     if (!appConfig.xray_path.empty()) {
-      std::string fused_xray_path =
-          "E:/multi_source_info/lidar/results/08_fused_thickness_xray" +
-          strategy_suffix + ".jpg";
+      std::string fused_xray_path = appConfig.results_dir +
+                                    "/08_fused_thickness_xray" +
+                                    strategy_suffix + ".jpg";
 
       std::cout << "Fusing ores thickness map with X-ray image ("
                 << appConfig.xray_path << ")..." << std::endl;

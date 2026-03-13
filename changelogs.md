@@ -1,3 +1,11 @@
+## 2026-03-13
+### 全局厚度图分辨率解耦 (Global Thickness Map Resolution Decoupling)
+- **参数体系重构**: 在config当中引入独立配置项 `thickness_map_resolution` 以定义 2D 厚度地图的输出空间分辨率（米）。该重构彻底解绑了全局厚度图分辨率与点云底层物理坐标缩放系数 (`unit_scale`) 之间的隐式计算依赖，避免了因调整光栅化输出分辨率而连带破坏核心点云物理尺度转换逻辑的隐患。相关调用（如 `generateGlobalThicknessMap`）均已适配更新。
+
+### 矿石厚度统计特征扩展与单次遍历优化 (Ore Thickness Statistical Expansion and Single-Pass Optimization)
+- **拓展统计描述特征**: 增强了单目标矿石的三维几何特征提取，在终端输出模型中补充了**最小厚度极值 (Min)** 与**厚度标准差 (Std)** 指标，为量化描述矿石表面的宏观离散度与凹凸平滑度提供了更完备的统计学参考。
+- **算法复杂度优化**: 针对厚度均值与标准差的计算实现，引入了 **Welford 算法 (Welford's online algorithm)** 进行重构。该算法保证了在 O(N) 的时间复杂度内，通过单次数据流扫描 (`single-pass`) 即可稳定、高精度地并发计算出均值与方差。此优化有效消除了传统统计公式所需的二次遍历，显著降低了算法的内存 Cache 指令开销，进而提升了针对大规模点云簇的计算效能。
+
 ## 2026-03-12
 ### 图像输出添加序号前缀 (Output Image Sequence Prefixing)
 - **为所有中间与最终输出图像添加序号前缀**：为了展示算法处理的先后顺序，在 `app_pipeline.cpp` 和 `ore_analysis.cpp` 中将保存到 `results/` 下的文件重命名。顺序如下：

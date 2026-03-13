@@ -1,3 +1,6 @@
+## 0313
+- [x] 指定results的保存路径并且自动创建，而不需要手动创建
+- [ ] detectByLidar的存图逻辑是啥
 ## 0306
 - [ ] lidar crop up and thickness top?
 - [ ] resize point cloud data?

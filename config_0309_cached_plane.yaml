@@ -1,18 +1,16 @@
 
 pcd_path: "E:/multi_source_info/lidar/pcd_data/20260309_banyan_detong_63/savedata_1_63_cropped.ply"
-results_dir: "E:/multi_source_info/lidar/results_0309_0p01"
-unit_scale: 0.001000 # Conversion factor from point cloud units to physical meters. usage: physical_meters = point_cloud_unit * unit_scale
-thickness_map_resolution: 0.01 # Target physical resolution of the generated 2D global thickness map in meters (e.g., 0.01 = 1 cm per pixel)
+unit_scale: 0.001000 # unit_scale: 3.527695 # unit_scale: 0.003375 # Conversion factor from point cloud units to physical meters. usage: physical_meters = point_cloud_unit * unit_scale
 # Plane detection options
-save_plane_equation: true  # If true, save detected plane to this file
+save_plane_equation: false  # If true, save detected plane to this file
 visual_plane: false          # If true, visualize the ground plane in viewer
 
 # Plane equation (auto-filled if save_plane_equation=true, or manually set)
 # Format: ax + by + cz + d = 0
-plane_a: -0.000316
-plane_b: -0.008745
-plane_c: 0.999962
-plane_d: -925.519592
+plane_a: 0.000004
+plane_b: -0.008782
+plane_c: 0.999961
+plane_d: -927.410950
 
 fit_belt_edges: false # If true, detect and calibrate side panels. If false, use belt_min_y/max_y directly.
 belt_min_y: -478.056000
@@ -20,7 +18,7 @@ belt_max_y: 443.395081
 
 ground_filter_sigma: 4.000000
 ground_filter_margin: 1.000000
-ground_threshold: 2.080728
+ground_threshold: 2.087664
 
 # Ore Detection Setting
 # Options: "lidar" (Point cloud clustering), "mask" (RGB/XRT mask extraction), "roi" (RGB/XRT ROI extraction)
