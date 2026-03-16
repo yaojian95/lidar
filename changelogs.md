@@ -1,3 +1,15 @@
+## 2026-03-16
+### 支持 LiDAR 模式下动态矿石掩码生成与多模态切片保存 (Dynamic Ore Mask Generation and Multi-Modal Patch Saving in LiDAR Mode)
+- **动态生成二值掩码**: 解决了当 `detection_mode: "lidar"`（纯点云聚类模式）时，因缺乏 2D 图像对应的 `ore_masks` 导致无法导出单矿石图像切片的问题。现在系统会在聚类提取出 3D 矿石点云后，自动将每个独立矿石的三维坐标系根据分辨率精确反投射(Project)回统一的 2D `Thickness Map` 像素坐标系中。
+- **形态学连通性修复**: 针对激光雷达点云稀疏投影到高分辨率 2D 图像时产生的“椒盐状”离散噪点问题，新引入了基于椭圆核的数学形态学闭运算 (`cv::morphologyEx` with `cv::MORPH_CLOSE`)，将稀疏点强行融合成连通块，随后提取外轮廓并使用 `cv::FILLED` 参数进行实心填充，确保每块矿石的掩码完整无空洞。
+- **打通数据导出流水线**: 构建出的虚拟 `ore_masks` 完美“骗过”了下游的图像保存模块。现在即使用户在配置文件中选用纯点云探测 (`lidar`)，程序依然能够像视觉分割模式 (`mask`/`roi`) 那样，在 `results/ore_patches` 文件夹下乖乖输出每一块矿石完美的独立包裹切片（包括 `.tif` 深度图、`_mask.png` 掩码图和双能 XRT 局部子图）。
+
+### 矿石空间排序与输出增强 (Unified Spatial Sorting and Output Enhancement)
+- **通用空间排序工具**: 在 `OreAnalyzer` 中新增静态方法 `sortOresSpatially`，统一了 LiDAR 聚类和图像分割的排序逻辑。
+- **LiDAR 模式对齐修复**: 修正了 LiDAR 模式下轮廓叠加图偏移和方向不对的问题。通过将 `ore_masks` 的生成时机延后到 `thickness_map` 对齐（旋转与缩放）之后，确保了掩码坐标与 XRT 图像坐标系完美契合。
+- **LiDAR 模式补全轮廓叠加图**: 现在 LiDAR 模式也会导出带编号的轮廓覆盖图，方便可视化校验。
+- **轮廓颜色统一**: 将低能 (Low) 叠加图中的矿石轮廓颜色从绿色统一修改为红色，与高能 (High) 叠加图保持一致。
+
 ## 2026-03-13
 ### 全局厚度图分辨率解耦 (Global Thickness Map Resolution Decoupling)
 - **参数体系重构**: 在config当中引入独立配置项 `thickness_map_resolution` 以定义 2D 厚度地图的输出空间分辨率（米）。该重构彻底解绑了全局厚度图分辨率与点云底层物理坐标缩放系数 (`unit_scale`) 之间的隐式计算依赖，避免了因调整光栅化输出分辨率而连带破坏核心点云物理尺度转换逻辑的隐患。相关调用（如 `generateGlobalThicknessMap`）均已适配更新。

@@ -529,6 +529,18 @@ for (const auto& it : final_cluster_indices) {
 }
 ```
 
+**Step 5: 动态投影掩码生成 (仅 `lidar` 模式)**
+为了打通基于 2D 轮廓掩码的图像保存流水线且保证坐标对齐，当 `detection_mode: "lidar"` 时，掩码生成被延后至 `thickness_map` 对齐之后：
+1. **对齐后投影**: 在 `thickness_map` 完成转置和缩放（与目标图像一致）后，将点云簇中的 3D 点基于物理边界（`min_x`, `max_y` 等）投影到该对齐后的 2D 矩阵中。
+2. **坐标映射**: X 轴（LiDAR 前向）映射为图像行，Y 轴（LiDAR 横向）映射为图像列。
+3. **形态学与填充**: 使用 `7x7` 椭圆核进行闭运算填充空隙，并提取闭合轮廓生成实心 `ore_masks`。
+
+**Step 6: 统一空间排序与可视化 (Unified Sorting & Visualization)**
+无论何种检测模式，在获得与图像对齐的 `ores` 和 `ore_masks` 列表后：
+1. **`OreAnalyzer::sortOresSpatially`**: 基于掩码质心进行“行分组 + 左右”排序。
+2. **ID 重新分配**: 按排序结果分配 `ore_0`, `ore_1` ... ID。
+3. **Overlay 生成**: 在 `app_pipeline` 统一出口渲染 `03/04_extracted_contours_overlay_low/high.jpg`，确保轮廓（统一使用红色）、标签（黄色）与 XRT 图像完全对齐。
+
 ---
 
 #### 3. `detectByROI()` - 基于 X 射线 ROI 的检测

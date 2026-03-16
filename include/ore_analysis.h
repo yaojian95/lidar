@@ -153,6 +153,10 @@ public:
                              FusionCrops lidar_crops,
                              const std::vector<Ore> *ores = nullptr);
 
+  // Static utility to sort ores by reading order (top-to-bottom, left-to-right)
+  static void sortOresSpatially(std::vector<Ore> &ores,
+                                std::vector<cv::Mat> &masks);
+
 private:
   PointCloudPtr original_cloud_;
   PointCloudPtr aligned_cloud_;

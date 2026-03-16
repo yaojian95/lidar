@@ -1806,3 +1806,47 @@ bool OreAnalyzer::fuseThicknessWithXray(const ThicknessMap &map,
   std::cout << "Saving X-ray Fusion to " << output_filename << std::endl;
   return cv::imwrite(output_filename, final_image);
 }
+
+void OreAnalyzer::sortOresSpatially(std::vector<Ore> &ores,
+                                    std::vector<cv::Mat> &masks) {
+  if (ores.size() <= 1 || masks.size() != ores.size())
+    return;
+
+  std::vector<size_t> sort_idx(ores.size());
+  std::iota(sort_idx.begin(), sort_idx.end(), 0);
+
+  std::vector<cv::Point> centroids(ores.size());
+  std::vector<int> heights(ores.size());
+  for (size_t i = 0; i < masks.size(); ++i) {
+    cv::Rect bbox = cv::boundingRect(masks[i]);
+    centroids[i] = cv::Point(bbox.x + bbox.width / 2, bbox.y + bbox.height / 2);
+    heights[i] = bbox.height;
+  }
+
+  // Use median ore height as the row-banding tolerance
+  std::vector<int> sorted_heights = heights;
+  std::sort(sorted_heights.begin(), sorted_heights.end());
+  int band_tolerance = sorted_heights[sorted_heights.size() / 2];
+
+  std::sort(sort_idx.begin(), sort_idx.end(),
+            [&centroids, band_tolerance](size_t a, size_t b) {
+              // If Y centroids are within band_tolerance, treat as same row
+              int dy = centroids[a].y - centroids[b].y;
+              if (std::abs(dy) > band_tolerance) {
+                // Different rows: sort top-to-bottom
+                return centroids[a].y < centroids[b].y;
+              }
+              // Same row: sort left-to-right
+              return centroids[a].x < centroids[b].x;
+            });
+
+  // Apply sort order
+  std::vector<Ore> sorted_ores(ores.size());
+  std::vector<cv::Mat> sorted_masks(masks.size());
+  for (size_t i = 0; i < sort_idx.size(); ++i) {
+    sorted_ores[i] = ores[sort_idx[i]];
+    sorted_masks[i] = masks[sort_idx[i]];
+  }
+  ores = std::move(sorted_ores);
+  masks = std::move(sorted_masks);
+}

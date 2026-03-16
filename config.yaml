@@ -1,86 +1,86 @@
 
-pcd_path: "E:/multi_source_info/lidar/pcd_data/20260309_banyan_detong_63/savedata_1_63_cropped.ply"
-results_dir: "E:/multi_source_info/lidar/results_0309_0p01"
-unit_scale: 0.001000 # Conversion factor from point cloud units to physical meters. usage: physical_meters = point_cloud_unit * unit_scale
-thickness_map_resolution: 0.01 # Target physical resolution of the generated 2D global thickness map in meters (e.g., 0.01 = 1 cm per pixel)
-# Plane detection options
-save_plane_equation: true  # If true, save detected plane to this file
-visual_plane: false          # If true, visualize the ground plane in viewer
+  pcd_path: "E:/multi_source_info/lidar/pcd_data/20260309_banyan_detong_63/savedata_1_63_cropped.ply"
+  results_dir: "E:/multi_source_info/lidar/results_0309_0p002_by_lidar"
+  unit_scale: 0.001000 # Conversion factor from point cloud units to physical meters. usage: physical_meters = point_cloud_unit * unit_scale
+  thickness_map_resolution: 0.002 # Target physical resolution of the generated 2D global thickness map in meters (e.g., 0.01 = 1 cm per pixel)
+  # Plane detection options
+  save_plane_equation: true  # If true, save detected plane to this file
+  visual_plane: false          # If true, visualize the ground plane in viewer
 
-# Plane equation (auto-filled if save_plane_equation=true, or manually set)
-# Format: ax + by + cz + d = 0
-plane_a: -0.000316
-plane_b: -0.008745
-plane_c: 0.999962
-plane_d: -925.519592
+  # Plane equation (auto-filled if save_plane_equation=true, or manually set)
+  # Format: ax + by + cz + d = 0
+  plane_a: -0.000316
+  plane_b: -0.008745
+  plane_c: 0.999962
+  plane_d: -925.519592
 
-fit_belt_edges: false # If true, detect and calibrate side panels. If false, use belt_min_y/max_y directly.
-belt_min_y: -478.056000
-belt_max_y: 443.395081
+  fit_belt_edges: false # If true, detect and calibrate side panels. If false, use belt_min_y/max_y directly.
+  belt_min_y: -478.056000
+  belt_max_y: 443.395081
 
-ground_filter_sigma: 4.000000
-ground_filter_margin: 1.000000
-ground_threshold: 2.080728
+  ground_filter_sigma: 4.000000
+  ground_filter_margin: 1.000000
+  ground_threshold: 2.080728
 
-# Ore Detection Setting
-# Options: "lidar" (Point cloud clustering), "mask" (RGB/XRT mask extraction), "roi" (RGB/XRT ROI extraction)
-# detection_mode: "lidar"
-detection_mode: "mask"
+  # Ore Detection Setting
+  # Options: "lidar" (Point cloud clustering), "mask" (RGB/XRT mask extraction), "roi" (RGB/XRT ROI extraction)
+  # detection_mode: "mask"
+  detection_mode: "lidar"
 
-# Ore Detection (Euclidean Clustering)
-cluster_tolerance: 20.0 # Distance between points to be considered part of the same object (in point cloud units)
-min_cluster_size: 50    # Minimum number of points to form an ore chunk
-max_cluster_size: 50000 # Maximum number of points to form an ore chunk
+  # Ore Detection (Euclidean Clustering)
+  cluster_tolerance: 20.0 # Distance between points to be considered part of the same object (in point cloud units)
+  min_cluster_size: 50    # Minimum number of points to form an ore chunk
+  max_cluster_size: 50000 # Maximum number of points to form an ore chunk
 
-# Hybrid Clustering & Segmentation
-cluster_strategy: 0 # 0: Euclidean Only, 1: Aspect Ratio, 2: Concavity/Density, 3: Multi-peaks
-aspect_ratio_threshold: 2.5 # Aspect ratio > X triggers secondary Region Growing
-density_threshold: 0.3 # Bounding box occupancy density < X triggers secondary Region Growing
-rg_smoothness: 15.0 # Region Growing threshold in degrees (if normals change > X, split cluster)
-rg_curvature: 1.0 # Region Growing curvature threshold
+  # Hybrid Clustering & Segmentation
+  cluster_strategy: 2 # 0: Euclidean Only, 1: Aspect Ratio, 2: Concavity/Density, 3: Multi-peaks
+  aspect_ratio_threshold: 2.5 # Aspect ratio > X triggers secondary Region Growing
+  density_threshold: 0.3 # Bounding box occupancy density < X triggers secondary Region Growing
+  rg_smoothness: 15.0 # Region Growing threshold in degrees (if normals change > X, split cluster)
+  rg_curvature: 1.0 # Region Growing curvature threshold
 
-# Fusion Options
-# Options: "rgb", "xray", "false"
-fuse: "xray"            
-# fuse: "rgb"
-# fuse: false
-fusion_channel: 2      # 0: Blue, 1: Green, 2: Red
+  # Fusion Options
+  # Options: "rgb", "xray", "false"
+  fuse: "xray"            
+  # fuse: "rgb"
+  # fuse: false
+  fusion_channel: 2      # 0: Blue, 1: Green, 2: Red
 
-# X-ray Parameters
-# xray_path: "E:/multi_source_info/lidar/pcd_data/20260205/xray_0p5ms-1.png"
-xray_path: "E:/multi_source_info/lidar/pcd_data/20260309_banyan_detong_63/banyan_Detong_1_63_347.png"  
+  # X-ray Parameters
+  # xray_path: "E:/multi_source_info/lidar/pcd_data/20260205/xray_0p5ms-1.png"
+  xray_path: "E:/multi_source_info/lidar/pcd_data/20260309_banyan_detong_63/banyan_Detong_1_63_347.png"  
 
-# X-ray Geometric Correction
-enable_xray_geometry_correction: false
-# M = sdd / sod. The image will be shrunk by 1/M.
-xray_sod: 40.0
-xray_sdd: 60.0
+  # X-ray Geometric Correction
+  enable_xray_geometry_correction: false
+  # M = sdd / sod. The image will be shrunk by 1/M.
+  xray_sod: 40.0
+  xray_sdd: 60.0
 
-# X-ray Crop Parameters (For fusion mode: xray)
-xray_cut_left: 130
-xray_cut_right: 120
-# X-ray ROI Crops (Applied after the cuts above)
-xray_crop_up: 0
-xray_crop_down: 0
-xray_crop_left: 10
-xray_crop_right: 20
+  # X-ray Crop Parameters (For fusion mode: xray)
+  xray_cut_left: 130
+  xray_cut_right: 120
+  # X-ray ROI Crops (Applied after the cuts above)
+  xray_crop_up: 0
+  xray_crop_down: 0
+  xray_crop_left: 10
+  xray_crop_right: 20
 
-#up and down means direction aligned with the betl
-#left and right means direction across the belt
-# RGB ROI Crops (Define the Valid Area on the RGB Image)
-rgb_crop_up: 690
-rgb_crop_down: 0
-rgb_crop_left: 140
-rgb_crop_right: 90
+  #up and down means direction aligned with the betl
+  #left and right means direction across the belt
+  # RGB ROI Crops (Define the Valid Area on the RGB Image)
+  rgb_crop_up: 690
+  rgb_crop_down: 0
+  rgb_crop_left: 140
+  rgb_crop_right: 90
 
-# LiDAR ROI Crops (Define the Valid Area on the Thickness Map)
-# Use this to match the physical FOV of the RGB crop
-# same units with belt_min_y/max_y
-# down actually means up in the image
-lidar_crop_up: 60
-lidar_crop_down: 200
-lidar_crop_left: 0
-lidar_crop_right: 0
+  # LiDAR ROI Crops (Define the Valid Area on the Thickness Map)
+  # Use this to match the physical FOV of the RGB crop
+  # same units with belt_min_y/max_y
+  # down actually means up in the image
+  lidar_crop_up: 60
+  lidar_crop_down: 200
+  lidar_crop_left: 0
+  lidar_crop_right: 0
 
-# Visualization
-enable_visualization: false # Enable/Disable PCL visualization window
+  # Visualization
+  enable_visualization: false # Enable/Disable PCL visualization window

@@ -456,122 +456,9 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
         ore_masks.push_back(contour.mask.clone());
       }
     }
-
-    // Sort ores spatially: top-to-bottom, left-to-right (with row banding)
-    // Ores with similar Y centroids are grouped into the same "row" to handle
-    // slight vertical misalignment. Within each row, sort by X (left-to-right).
-    if (ores.size() > 1) {
-      std::vector<size_t> sort_idx(ores.size());
-      std::iota(sort_idx.begin(), sort_idx.end(), 0);
-
-      std::vector<cv::Point> centroids(ores.size());
-      std::vector<int> heights(ores.size());
-      for (size_t i = 0; i < ore_masks.size(); ++i) {
-        cv::Rect bbox = cv::boundingRect(ore_masks[i]);
-        centroids[i] =
-            cv::Point(bbox.x + bbox.width / 2, bbox.y + bbox.height / 2);
-        heights[i] = bbox.height;
-      }
-
-      // Use median ore height as the row-banding tolerance
-      std::vector<int> sorted_heights = heights;
-      std::sort(sorted_heights.begin(), sorted_heights.end());
-      int band_tolerance = sorted_heights[sorted_heights.size() / 2];
-
-      std::sort(sort_idx.begin(), sort_idx.end(),
-                [&centroids, band_tolerance](size_t a, size_t b) {
-                  // If Y centroids are within band_tolerance, treat as same row
-                  int dy = centroids[a].y - centroids[b].y;
-                  if (std::abs(dy) > band_tolerance) {
-                    // Different rows: sort top-to-bottom
-                    return centroids[a].y < centroids[b].y;
-                  }
-                  // Same row: sort left-to-right
-                  return centroids[a].x < centroids[b].x;
-                });
-
-      // Apply sort order
-      std::vector<Ore> sorted_ores(ores.size());
-      std::vector<cv::Mat> sorted_masks(ore_masks.size());
-      for (size_t i = 0; i < sort_idx.size(); ++i) {
-        sorted_ores[i] = ores[sort_idx[i]];
-        sorted_masks[i] = ore_masks[sort_idx[i]];
-      }
-      ores = std::move(sorted_ores);
-      ore_masks = std::move(sorted_masks);
-    }
-
-    // Assign sequential IDs after sorting
-    for (size_t i = 0; i < ores.size(); ++i) {
-      ores[i].id = "ore_" + std::to_string(i);
-    }
-
-    // Redraw contour overlays with sorted IDs on low/high XRT images
-    if (!fusion_target_image.empty() && !ore_masks.empty()) {
-      cv::Mat overlay_low = fusion_target_image.clone();
-      if (overlay_low.channels() == 1)
-        cv::cvtColor(overlay_low, overlay_low, cv::COLOR_GRAY2BGR);
-
-      cv::Mat overlay_high;
-      if (!fusion_target_image_high.empty()) {
-        overlay_high = fusion_target_image_high.clone();
-        if (overlay_high.channels() == 1)
-          cv::cvtColor(overlay_high, overlay_high, cv::COLOR_GRAY2BGR);
-      }
-
-      for (size_t i = 0; i < ore_masks.size(); ++i) {
-        // Find contours from mask for drawing
-        std::vector<std::vector<cv::Point>> contour_pts;
-        cv::findContours(ore_masks[i].clone(), contour_pts, cv::RETR_EXTERNAL,
-                         cv::CHAIN_APPROX_SIMPLE);
-
-        cv::drawContours(overlay_low, contour_pts, -1, cv::Scalar(0, 255, 0),
-                         2);
-        if (!overlay_high.empty())
-          cv::drawContours(overlay_high, contour_pts, -1, cv::Scalar(0, 0, 255),
-                           2);
-
-        // Label with ore ID at centroid
-        cv::Rect bbox = cv::boundingRect(ore_masks[i]);
-        cv::Point label_pos(bbox.x + bbox.width / 2 - 10,
-                            bbox.y + bbox.height / 2 + 5);
-        std::string label = std::to_string(i);
-        cv::putText(overlay_low, label, label_pos, cv::FONT_HERSHEY_SIMPLEX,
-                    0.6, cv::Scalar(0, 255, 255), 2);
-        if (!overlay_high.empty())
-          cv::putText(overlay_high, label, label_pos, cv::FONT_HERSHEY_SIMPLEX,
-                      0.6, cv::Scalar(0, 255, 255), 2);
-      }
-
-      cv::imwrite(appConfig.results_dir +
-                      "/"
-                      "03_extracted_contours_overlay_low.jpg",
-                  overlay_low);
-      if (!overlay_high.empty())
-        cv::imwrite(appConfig.results_dir +
-                        "/"
-                        "04_extracted_contours_overlay_high.jpg",
-                    overlay_high);
-      std::cout << "Saved labeled contour overlays with sorted IDs."
-                << std::endl;
-    }
   } else {
     std::cerr << "Unknown detection_mode: " << appConfig.detection_mode
               << std::endl;
-    return;
-  }
-
-  std::cout << "Found " << ores.size() << " potential ore chunks." << std::endl;
-
-  for (auto &ore : ores) {
-    analyzer.computeStats(ore, false);
-    size_t point_count =
-        ore.point_indices ? ore.point_indices->indices.size() : 0;
-    std::cout << "Ore " << ore.id << " [" << point_count
-              << " pts]: Avg Thickness = " << ore.avg_thickness
-              << " mm (Min: " << ore.min_thickness
-              << " mm, Max: " << ore.max_thickness
-              << " mm, Std: " << ore.std_thickness << " mm)" << std::endl;
   }
 
   // =====================================================================
@@ -596,6 +483,101 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
               << ")" << std::endl;
     analyzer.alignThicknessMapToImage(thickness_map,
                                       fusion_target_image.size());
+
+    // Postponed LiDAR mask generation: now that the map is aligned/transposed/resized,
+    // we can project 3D points directly into the final image coordinate space.
+    if (appConfig.detection_mode == "lidar" && !ores.empty()) {
+      std::cout << "Dynamically generating 2D ore masks from 3D LiDAR points (Aligned Space)..." << std::endl;
+      for (const auto& ore : ores) {
+        cv::Mat mask = cv::Mat::zeros(thickness_map.height, thickness_map.width, CV_8UC1);
+        if (ore.point_indices && !ore.point_indices->indices.empty()) {
+          for (int idx : ore.point_indices->indices) {
+            const auto& pt = analyzer.getAlignedCloud()->points[idx];
+            // Transposed mapping calculation:
+            // pt.x -> image rows (Y in visual)
+            // pt.y -> image cols (X in visual)
+            float rel_x = (pt.x - thickness_map.min_x) / (thickness_map.max_x - thickness_map.min_x);
+            float rel_y = (thickness_map.max_y - pt.y) / (thickness_map.max_y - thickness_map.min_y);
+            
+            int mask_r = static_cast<int>(rel_x * thickness_map.height);
+            int mask_c = static_cast<int>(rel_y * thickness_map.width);
+            
+            if (mask_r >= 0 && mask_r < mask.rows && mask_c >= 0 && mask_c < mask.cols) {
+              mask.at<uint8_t>(mask_r, mask_c) = 255;
+            }
+          }
+          cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(7, 7));
+          cv::morphologyEx(mask, mask, cv::MORPH_CLOSE, kernel);
+          std::vector<std::vector<cv::Point>> contours;
+          cv::findContours(mask.clone(), contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+          mask = cv::Mat::zeros(mask.size(), CV_8UC1);
+          cv::drawContours(mask, contours, -1, cv::Scalar(255), cv::FILLED);
+        }
+        ore_masks.push_back(mask);
+      }
+    }
+  }
+
+  // Unified Spatial Sorting, ID Assignment and Overlay Generation
+  // This must happen AFTER masks are available for all modes.
+  if (!ore_masks.empty()) {
+    if (ores.size() > 1) {
+      std::cout << "Sorting " << ores.size() << " ores spatially..." << std::endl;
+      OreAnalyzer::sortOresSpatially(ores, ore_masks);
+    }
+
+    // Assign Sequential IDs after sorting
+    for (size_t i = 0; i < ores.size(); ++i) {
+      ores[i].id = "ore_" + std::to_string(i);
+    }
+
+    // Generate and Save Contour Overlay Images
+    cv::Mat overlay_low;
+    if (!fusion_target_image.empty()) {
+      overlay_low = fusion_target_image.clone();
+      if (overlay_low.channels() == 1)
+        cv::cvtColor(overlay_low, overlay_low, cv::COLOR_GRAY2BGR);
+    } else {
+      overlay_low = cv::Mat::zeros(thickness_map.height, thickness_map.width, CV_8UC3);
+    }
+
+    cv::Mat overlay_high;
+    if (!fusion_target_image_high.empty()) {
+      overlay_high = fusion_target_image_high.clone();
+      if (overlay_high.channels() == 1)
+        cv::cvtColor(overlay_high, overlay_high, cv::COLOR_GRAY2BGR);
+    }
+
+    for (size_t i = 0; i < ore_masks.size(); ++i) {
+      std::vector<std::vector<cv::Point>> contour_pts;
+      cv::findContours(ore_masks[i].clone(), contour_pts, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+      cv::drawContours(overlay_low, contour_pts, -1, cv::Scalar(0, 0, 255), 2);
+      if (!overlay_high.empty())
+        cv::drawContours(overlay_high, contour_pts, -1, cv::Scalar(0, 0, 255), 2);
+
+      cv::Rect bbox = cv::boundingRect(ore_masks[i]);
+      cv::Point label_pos(bbox.x + bbox.width / 2 - 10, bbox.y + bbox.height / 2 + 5);
+      cv::putText(overlay_low, std::to_string(i), label_pos, cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 255), 2);
+      if (!overlay_high.empty())
+        cv::putText(overlay_high, std::to_string(i), label_pos, cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 255), 2);
+    }
+
+    cv::imwrite(appConfig.results_dir + "/03_extracted_contours_overlay_low.jpg", overlay_low);
+    if (!overlay_high.empty())
+      cv::imwrite(appConfig.results_dir + "/04_extracted_contours_overlay_high.jpg", overlay_high);
+    std::cout << "Saved unified contour overlays to 03/04_extracted_contours_overlay_low/high.jpg" << std::endl;
+  }
+
+  std::cout << "Found " << ores.size() << " potential ore chunks." << std::endl;
+
+  for (auto &ore : ores) {
+    analyzer.computeStats(ore, false);
+    size_t point_count = ore.point_indices ? ore.point_indices->indices.size() : 0;
+    std::cout << "Ore " << ore.id << " [" << point_count
+              << " pts]: Avg Thickness = " << ore.avg_thickness
+              << " mm (Min: " << ore.min_thickness
+              << " mm, Max: " << ore.max_thickness
+              << " mm, Std: " << ore.std_thickness << " mm)" << std::endl;
   }
 
   // =====================================================================
@@ -616,6 +598,7 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
   // Stage 3: ORES - rescaled map masked by XRT ore contours
   // =====================================================================
   OreAnalyzer::ThicknessMap ores_thickness_map = thickness_map;
+
   if (!ore_masks.empty() && !rescaled_mat.empty()) {
     cv::Mat ores_mat = rescaled_mat.clone();
 
