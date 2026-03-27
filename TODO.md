@@ -1,7 +1,12 @@
+## 0324
+- [ ] 耗时详细比较
+- [ ] 单块矿石的体积（与排水法求得的体积进行对比）
+
 ## 0313
 - [x] 指定results的保存路径并且自动创建，而不需要手动创建
 - [ ] detectByLidar的存图逻辑是啥
 - [ ] high and low output 几何畸变
+
 ## 0306
 - [ ] lidar crop up and thickness top?
 - [ ] resize point cloud data?
