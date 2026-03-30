@@ -110,38 +110,6 @@ bool processCalibrationAndGround(OreAnalyzer &analyzer, AppConfig &appConfig,
                 << appConfig.belt_min_y << " to " << appConfig.belt_max_y
                 << std::endl;
 
-      // Calculate and output belt points resolution
-      float physical_width =
-          std::abs(appConfig.belt_max_y - appConfig.belt_min_y);
-      if (physical_width > 0.0f) {
-        // Estimate the number of points in a single scanline (cross-belt
-        // direction) Since typical lidar sweeps form a profile line, we look
-        // for the first Y "wraparound"
-        size_t points_per_line = analyzer.getAlignedCloud()->size(); // fallback
-        if (points_per_line > 1) {
-          for (size_t i = 1; i < analyzer.getAlignedCloud()->size(); ++i) {
-            float dy = std::abs(analyzer.getAlignedCloud()->points[i].y -
-                                analyzer.getAlignedCloud()->points[i - 1].y);
-            // A massive jump in Y typically implies completing one line and
-            // returning to the start for the next
-            if (dy > physical_width * 0.5f) {
-              points_per_line = i;
-              break;
-            }
-          }
-        }
-
-        if (points_per_line > 0) {
-          // Resolution is Physical Distance / Point Count -> mm/point
-          float resolution =
-              physical_width / static_cast<float>(points_per_line);
-          std::cout << "Belt Cloud Resolution: " << resolution
-                    << " mm/point (Width: " << physical_width
-                    << "mm, Points per line: " << points_per_line << ")"
-                    << std::endl;
-        }
-      }
-
       analyzer.setBeltBoundaries(appConfig.belt_min_y, appConfig.belt_max_y);
       analyzer.filterSidePanels();
     }
@@ -224,8 +192,8 @@ static void saveOrePatches(const OreAnalyzer::ThicknessMap &ores_map,
       cv::imwrite(prefix + "_xrt_high.png", high_patch);
     }
 
-    std::cout << "Saved patches for " << ores[i].id << " (" << bbox.width << "x"
-              << bbox.height << ")" << std::endl;
+    // std::cout << "Saved patches for " << ores[i].id << " (" << bbox.width << "x"
+              // << bbox.height << ")" << std::endl;
   }
 }
 
@@ -570,14 +538,73 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
 
   std::cout << "Found " << ores.size() << " potential ore chunks." << std::endl;
 
+  std::cout << "Found " << ores.size() << " potential ore chunks." << std::endl;
+
+  // Use explicit dx and dy from config (mm)
+  float dx = appConfig.dx_mm;
+  float dy = appConfig.dy_mm;
+  float area_per_point_mm2 = dx * dy;
+
+  std::cout << "Resolution (Config): dx=" << dx << "mm, dy=" << dy << "mm"
+            << " (Area=" << area_per_point_mm2 << " mm^2)" << std::endl;
+
+  // Determine output file name from xray_path
+  std::string base_name = "ore_stats";
+  if (!appConfig.xray_path.empty()) {
+    std::string path_str = appConfig.xray_path;
+    size_t last_slash = path_str.find_last_of("/\\");
+    std::string file_name = (last_slash == std::string::npos)
+                                ? path_str
+                                : path_str.substr(last_slash + 1);
+    size_t last_dot = file_name.find_last_of(".");
+    base_name =
+        (last_dot == std::string::npos) ? file_name : file_name.substr(0, last_dot);
+  } else if (!appConfig.pcd_path.empty()) {
+    std::string path_str = appConfig.pcd_path;
+    size_t last_slash = path_str.find_last_of("/\\");
+    std::string file_name = (last_slash == std::string::npos)
+                                ? path_str
+                                : path_str.substr(last_slash + 1);
+    size_t last_dot = file_name.find_last_of(".");
+    base_name =
+        (last_dot == std::string::npos) ? file_name : file_name.substr(0, last_dot);
+  }
+  std::string output_csv = appConfig.results_dir + "/" + base_name + ".csv";
+  std::ofstream out_file(output_csv);
+
+  if (out_file.is_open()) {
+    out_file << "Ore Analysis Report\n";
+    out_file << "Source," << appConfig.xray_path << "\n";
+    out_file << "ID,Points,AvgThickness(mm),MinThickness(mm),"
+                "MaxThickness(mm),StdThickness(mm),Volume(cm3)\n";
+  }
+
   for (auto &ore : ores) {
-    analyzer.computeStats(ore, false);
-    size_t point_count = ore.point_indices ? ore.point_indices->indices.size() : 0;
+    analyzer.computeStats(ore, false, appConfig.thickness_map_resolution,
+                          area_per_point_mm2);
+    size_t point_count =
+        ore.point_indices ? ore.point_indices->indices.size() : 0;
+
+    // Silence per-ore terminal output as requested
+    /*
     std::cout << "Ore " << ore.id << " [" << point_count
               << " pts]: Avg Thickness = " << ore.avg_thickness
               << " mm (Min: " << ore.min_thickness
               << " mm, Max: " << ore.max_thickness
-              << " mm, Std: " << ore.std_thickness << " mm)" << std::endl;
+              << " mm, Std: " << ore.std_thickness << " mm, Volume: " << ore.volume
+              << " cm3)" << std::endl;
+    */
+
+    if (out_file.is_open()) {
+      out_file << ore.id << "," << point_count << "," << ore.avg_thickness
+               << "," << ore.min_thickness << "," << ore.max_thickness << ","
+               << ore.std_thickness << "," << ore.volume << "\n";
+    }
+  }
+
+  if (out_file.is_open()) {
+    out_file.close();
+    std::cout << "Successfully saved statistics to " << output_csv << std::endl;
   }
 
   // =====================================================================

@@ -1,6 +1,4 @@
 #pragma once
-
-#include <iostream>
 #include <opencv2/opencv.hpp>
 #include <pcl/PointIndices.h>
 #include <pcl/point_cloud.h>
@@ -17,6 +15,7 @@ struct Ore {
   float max_thickness = 0.0f;
   float min_thickness = 1e9f;
   float std_thickness = 0.0f;
+  float volume = 0.0f; // Volume in cubic centimeters (cm^3)
 
   // Physical bounding box (x, y)
   float min_x, max_x, min_y, max_y;
@@ -113,7 +112,9 @@ public:
   // Step 3: Calculation
   // If generate_map is true, it builds the 2D thickness grid using
   // interpolation
-  void computeStats(Ore &ore, bool generate_map = false, float map_res = 0.01f);
+  // area_per_point_mm2: used for volume calculation (sum of z * area)
+  void computeStats(Ore &ore, bool generate_map = false, float map_res = 0.01f,
+                    float area_per_point_mm2 = 0.0f);
 
   // Global Thickness Map
   // Generate a global 2D matrix of thickness values covering all detected ores

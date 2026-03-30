@@ -17,6 +17,8 @@ struct AppConfig {
   std::string pcd_path = "";
   std::string results_dir = "E:/multi_source_info/lidar/results";
   float unit_scale = 1.0f;
+  float dx_mm = 0.0f;         // Explicit point spacing in X (belt movement direction)
+  float dy_mm = 0.0f;         // Explicit point spacing in Y (across belt)
   bool save_plane = false;
   bool visual_plane = true;
   bool enable_visualization = true;

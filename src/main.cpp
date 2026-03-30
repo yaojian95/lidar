@@ -14,6 +14,28 @@ int main() {
   }
   AppConfig config = Config::parseAppConfig(raw_yaml);
 
+  // Auto-format results directory name based on resolution and mode
+  std::string base_dir = config.results_dir;
+  if (!base_dir.empty()) {
+    // Format resolution: 0.002 -> 0p002
+    char res_buf[32];
+    snprintf(res_buf, sizeof(res_buf), "%.3f", config.thickness_map_resolution);
+    std::string res_str(res_buf);
+    size_t dot_pos = res_str.find('.');
+    if (dot_pos != std::string::npos) {
+      res_str.replace(dot_pos, 1, "p");
+    }
+    // Remove trailing zeros (but keep at least one digit after 'p')
+    while (res_str.size() > dot_pos + 2 && res_str.back() == '0') {
+      res_str.pop_back();
+    }
+
+    // New format: prefix_0p002_by_mask
+    std::string formatted_dir =
+        base_dir + "_" + res_str + "_by_" + config.detection_mode;
+    config.results_dir = formatted_dir;
+  }
+
   // Auto-create results directories
   try {
     std::filesystem::create_directories(config.results_dir);

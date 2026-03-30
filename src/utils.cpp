@@ -34,6 +34,8 @@ AppConfig Config::parseAppConfig(const YAML::Node &config) {
   app.results_dir = get<std::string>(config, "results_dir",
                                      "E:/multi_source_info/lidar/results");
   app.unit_scale = get<float>(config, "unit_scale", 1.0f);
+  app.dx_mm = get<float>(config, "dx_mm", 0.0f);
+  app.dy_mm = get<float>(config, "dy_mm", 0.0f);
   app.save_plane = get<bool>(config, "save_plane_equation", false);
   app.visual_plane = get<bool>(config, "visual_plane", true);
   app.enable_visualization = get<bool>(config, "enable_visualization", true);
@@ -139,7 +141,9 @@ void saveConfigWithComments(const std::string &config_file,
         line.find("belt_max_y:") != std::string::npos ||
         line.find("ground_filter_sigma:") != std::string::npos ||
         line.find("ground_filter_margin:") != std::string::npos ||
-        line.find("unit_scale:") != std::string::npos) {
+        line.find("unit_scale:") != std::string::npos ||
+        line.find("belt_speed:") != std::string::npos ||
+        line.find("scan_rate:") != std::string::npos) {
 
       // Extract the key name
       std::string key;
@@ -163,6 +167,10 @@ void saveConfigWithComments(const std::string &config_file,
         key = "ground_filter_margin";
       else if (line.find("unit_scale:") != std::string::npos)
         key = "unit_scale";
+      else if (line.find("belt_speed:") != std::string::npos)
+        key = "belt_speed";
+      else if (line.find("scan_rate:") != std::string::npos)
+        key = "scan_rate";
 
       // Get leading whitespace
       size_t first_non_space = line.find_first_not_of(" \t");

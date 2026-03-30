@@ -1,8 +1,10 @@
 
   pcd_path: "E:/multi_source_info/lidar/pcd_data/20260309_banyan_detong_63/savedata_1_63_cropped.ply"
-  results_dir: "E:/multi_source_info/lidar/results_0309_0p002_by_lidar"
-  unit_scale: 0.001000 # Conversion factor from point cloud units to physical meters. usage: physical_meters = point_cloud_unit * unit_scale
-  thickness_map_resolution: 0.002 # Target physical resolution of the generated 2D global thickness map in meters (e.g., 0.01 = 1 cm per pixel)
+  results_dir: "E:/multi_source_info/lidar/results_0309"
+  unit_scale: 0.001000 # Conversion factor from point cloud units to physical meters.
+  dx_mm: 1.697          # Explicit point spacing in X (belt movement direction) in mm
+  dy_mm: 0.753          # Explicit point spacing in Y (across belt) in mm
+  thickness_map_resolution: 0.002 # Target physical resolution of the generated 2D global thickness map in meters
   # Plane detection options
   save_plane_equation: true  # If true, save detected plane to this file
   visual_plane: false          # If true, visualize the ground plane in viewer

@@ -576,7 +576,8 @@ OreAnalyzer::extractOresFromImage(const cv::Mat &image, const ThicknessMap &map,
   return results;
 }
 
-void OreAnalyzer::computeStats(Ore &ore, bool generate_map, float map_res) {
+void OreAnalyzer::computeStats(Ore &ore, bool generate_map, float map_res,
+                                float area_per_point_mm2) {
   if (ore.point_indices->indices.empty())
     return;
 
@@ -625,6 +626,17 @@ void OreAnalyzer::computeStats(Ore &ore, bool generate_map, float map_res) {
   ore.max_thickness = max_z;
   ore.min_thickness = (min_z == 1e9f) ? 0.0f : min_z;
   ore.std_thickness = count > 1 ? std::sqrt(M2 / count) : 0.0f;
+
+  // Calculate Volume: Sum(thickness_p * area_p)
+  float eff_area = area_per_point_mm2;
+  if (eff_area <= 0.0f && count > 0) {
+    // Fallback: estimate area per point from bounding box and point count
+    // Assumes pt.x/y are in point cloud units (e.g. mm)
+    float dx = std::abs(max_x - min_x);
+    float dy = std::abs(max_y - min_y);
+    eff_area = (dx * dy) / count;
+  }
+  ore.volume = (sum_z * eff_area) / 1000.0f; // mm^3 to cm^3
 
   ore.min_x = min_x;
   ore.max_x = max_x;
