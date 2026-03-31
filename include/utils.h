@@ -69,6 +69,7 @@ struct AppConfig {
   // X-Ray Fusion
   std::string xray_path = "";
   bool enable_xray_geometry_correction = true;
+  float xray_high_energy_correction_factor = 1.0f;
   float xray_sod = 20.0f;
   float xray_sdd = 60.0f;
   int xray_cut_left = 0;

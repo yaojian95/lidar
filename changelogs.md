@@ -1,3 +1,9 @@
+## [2026-03-31]
+### 高低能 XRT 几何畸变校正 (XRT High/Low Energy Distortion Correction)
+- **几何畸变补偿**: 针对高能和低能闪烁体探测器高度不同导致的扇形投影畸变，引入了 `xray_high_energy_correction_factor` 参数。
+- **对称对齐逻辑**: 在 `AppPipeline` 中实现了对高能图像的横向缩放校正。根据畸变呈“向外扩散”的特点，校正采用了**对称补全（Symmetric Padding）**或裁剪（Cropping）机制，确保校正后的高能图像与低能图像在中心对齐且尺寸一致。
+- **配置项**: 在 `config.yaml` 的 `X-ray Geometric Correction` 栏目下新增了该配置项。
+
 ## 2026-03-30
 ### 体积对比脚本配置固定化与多文件对比支持 (Fixed Path & Multi-File Support for Volume Comparison)
 - **配置固定化与全局化**: 在 `py_src/compare_volumes.py` 中引入了全局变量 `REF_FILE` 和 `GEN_FILES`。用户现在可以在文件顶层直接指定文件路径，极大方便了调试与多文件对比。

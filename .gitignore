@@ -94,3 +94,4 @@ data/
 # config.yaml
 
 *.xlsx
+*.csv

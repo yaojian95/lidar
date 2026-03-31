@@ -1,6 +1,6 @@
 
   pcd_path: "E:/multi_source_info/lidar/pcd_data/20260309_banyan_detong_63/savedata_1_63_cropped.ply"
-  results_dir: "E:/multi_source_info/lidar/results_0309"
+  results_dir: "E:/multi_source_info/lidar/results_0309_high_test"
   unit_scale: 0.001000 # Conversion factor from point cloud units to physical meters.
   dx_mm: 1.697          # Explicit point spacing in X (belt movement direction) in mm
   dy_mm: 0.753          # Explicit point spacing in Y (across belt) in mm
@@ -26,8 +26,8 @@
 
   # Ore Detection Setting
   # Options: "lidar" (Point cloud clustering), "mask" (RGB/XRT mask extraction), "roi" (RGB/XRT ROI extraction)
-  # detection_mode: "mask"
-  detection_mode: "lidar"
+  detection_mode: "mask"
+  # detection_mode: "lidar"
 
   # Ore Detection (Euclidean Clustering)
   cluster_tolerance: 20.0 # Distance between points to be considered part of the same object (in point cloud units)
@@ -54,6 +54,7 @@
 
   # X-ray Geometric Correction
   enable_xray_geometry_correction: false
+  xray_high_energy_correction_factor: 0.992 # Correction factor for high-energy image due to scintillator height difference
   # M = sdd / sod. The image will be shrunk by 1/M.
   xray_sod: 40.0
   xray_sdd: 60.0

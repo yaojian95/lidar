@@ -79,6 +79,8 @@ AppConfig Config::parseAppConfig(const YAML::Node &config) {
   app.xray_path = get<std::string>(config, "xray_path", "");
   app.enable_xray_geometry_correction =
       get<bool>(config, "enable_xray_geometry_correction", true);
+  app.xray_high_energy_correction_factor =
+      get<float>(config, "xray_high_energy_correction_factor", 1.0f);
   app.xray_sod = get<float>(config, "xray_sod", 20.0f);
   app.xray_sdd = get<float>(config, "xray_sdd", 60.0f);
   app.xray_cut_left = get<int>(config, "xray_cut_left", 0);

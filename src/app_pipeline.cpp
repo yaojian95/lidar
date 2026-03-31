@@ -277,6 +277,36 @@ void executeDetectionAndFusion(OreAnalyzer &analyzer,
               fusion_target_image = cropped.clone();
               fusion_target_image_high = cropped_high.clone();
             }
+
+            // Apply high-energy distortion correction (different scintillator height)
+            if (appConfig.xray_high_energy_correction_factor != 1.0f &&
+                !fusion_target_image_high.empty()) {
+              std::cout << "Applying X-ray High-Energy Distortion Correction (Factor: "
+                        << appConfig.xray_high_energy_correction_factor << ")" << std::endl;
+              
+              cv::Mat resized_high;
+              cv::resize(fusion_target_image_high, resized_high, cv::Size(),
+                         appConfig.xray_high_energy_correction_factor, 1.0, cv::INTER_LINEAR);
+              
+              // Pad or crop to match fusion_target_image (low-energy) width - Symmetric
+              int target_w = fusion_target_image.cols;
+              if (resized_high.cols != target_w) {
+                if (resized_high.cols < target_w) {
+                  int total_pad = target_w - resized_high.cols;
+                  int pad_left = total_pad / 2;
+                  int pad_right = total_pad - pad_left;
+                  cv::copyMakeBorder(resized_high, fusion_target_image_high, 0, 0, pad_left,
+                                     pad_right, cv::BORDER_CONSTANT, cv::Scalar(0));
+                } else {
+                  int total_crop = resized_high.cols - target_w;
+                  int crop_left = total_crop / 2;
+                  fusion_target_image_high = resized_high(cv::Rect(crop_left, 0, target_w, resized_high.rows)).clone();
+                }
+              } else {
+                fusion_target_image_high = resized_high;
+              }
+            }
+
             std::cout << "Prepared X-ray Image (" << fusion_target_image.cols
                       << "x" << fusion_target_image.rows << ") from crops."
                       << std::endl;
