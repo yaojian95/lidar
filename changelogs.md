@@ -1,7 +1,9 @@
+
 ## [2026-03-31]
 ### 高低能 XRT 几何畸变校正 (XRT High/Low Energy Distortion Correction)
 - **几何畸变补偿**: 针对高能和低能闪烁体探测器高度不同导致的扇形投影畸变，引入了 `xray_high_energy_correction_factor` 参数。
 - **对称对齐逻辑**: 在 `AppPipeline` 中实现了对高能图像的横向缩放校正。根据畸变呈“向外扩散”的特点，校正采用了**对称补全（Symmetric Padding）**或裁剪（Cropping）机制，确保校正后的高能图像与低能图像在中心对齐且尺寸一致。
+- **Python 自动校正工具增强**: 升级了 `py_src/auto_xrt_calibrate.py`。现在支持同时输入多个图片，基于第一张图自动计算系数并应用到后续图片中。增加了**亮度曲线分析 (Intensity Profile)** 以精确验证边缘对齐，并支持自动保存可视化结果图（Overlay、Diff、Profile）到 `results/` 目录下。
 - **配置项**: 在 `config.yaml` 的 `X-ray Geometric Correction` 栏目下新增了该配置项。
 
 ## 2026-03-30

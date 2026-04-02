@@ -54,7 +54,7 @@
 
   # X-ray Geometric Correction
   enable_xray_geometry_correction: false
-  xray_high_energy_correction_factor: 0.992 # Correction factor for high-energy image due to scintillator height difference
+  xray_high_energy_correction_factor: 0.9909 # Correction factor for high-energy image due to scintillator height difference
   # M = sdd / sod. The image will be shrunk by 1/M.
   xray_sod: 40.0
   xray_sdd: 60.0
