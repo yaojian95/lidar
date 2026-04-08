@@ -1,12 +1,14 @@
 
-  pcd_path: "E:/multi_source_info/lidar/pcd_data/20260309_banyan_detong_63/savedata_1_63_cropped.ply"
-  results_dir: "E:/multi_source_info/lidar/results_0309_high_test"
+  # pcd_path: "E:/multi_source_info/data_dir/20260309_banyan_detong_63/savedata_1_63_cropped.ply"
+  # results_dir: "E:/multi_source_info/lidar/results_0309_high_test"
+  pcd_path: "E:/multi_source_info/data_dir/20260325_yinshan/1_98_position_1_160kV_cropped.ply"
+  results_dir: "E:/multi_source_info/lidar/results_0325_yinshan"
   unit_scale: 0.001000 # Conversion factor from point cloud units to physical meters.
   dx_mm: 1.697          # Explicit point spacing in X (belt movement direction) in mm
   dy_mm: 0.753          # Explicit point spacing in Y (across belt) in mm
   thickness_map_resolution: 0.002 # Target physical resolution of the generated 2D global thickness map in meters
   # Plane detection options
-  save_plane_equation: true  # If true, save detected plane to this file
+  save_plane_equation: false  # If true, save detected plane to this file
   visual_plane: false          # If true, visualize the ground plane in viewer
 
   # Plane equation (auto-filled if save_plane_equation=true, or manually set)
@@ -50,7 +52,8 @@
 
   # X-ray Parameters
   # xray_path: "E:/multi_source_info/lidar/pcd_data/20260205/xray_0p5ms-1.png"
-  xray_path: "E:/multi_source_info/lidar/pcd_data/20260309_banyan_detong_63/banyan_Detong_1_63_347.png"  
+  # xray_path: "E:/multi_source_info/lidar/pcd_data/20260309_banyan_detong_63/banyan_Detong_1_63_347.png"  
+  xray_path: "E:/multi_source_info/data_dir/20260325_yinshan/1_98_position_1_160kV.tif"
 
   # X-ray Geometric Correction
   enable_xray_geometry_correction: false
@@ -60,11 +63,12 @@
   xray_sdd: 60.0
 
   # X-ray Crop Parameters (For fusion mode: xray)
+  ## for coverage gap between belt and valve
   xray_cut_left: 130
   xray_cut_right: 120
-  # X-ray ROI Crops (Applied after the cuts above)
-  xray_crop_up: 0
-  xray_crop_down: 0
+  ## X-ray ROI Crops (Applied after the cuts above)
+  xray_crop_up: 50 
+  xray_crop_down: 1720
   xray_crop_left: 10
   xray_crop_right: 20
 
@@ -80,8 +84,8 @@
   # Use this to match the physical FOV of the RGB crop
   # same units with belt_min_y/max_y
   # down actually means up in the image
-  lidar_crop_up: 60
-  lidar_crop_down: 200
+  lidar_crop_up: 0
+  lidar_crop_down: 0
   lidar_crop_left: 0
   lidar_crop_right: 0
 

@@ -10,8 +10,8 @@
 
 ## 0313
 - [x] 指定results的保存路径并且自动创建，而不需要手动创建
-- [ ] detectByLidar的存图逻辑是啥
-- [ ] high and low output 几何畸变
+- [x] detectByLidar的存图逻辑是啥
+- [x] high and low output 几何畸变
 
 ## 0306
 - [x] lidar crop up and thickness top?
@@ -21,8 +21,8 @@
 - [ ] 图片用异步保存？
 - [x] lidar crop units? 
 ## 02-26
-- [ ] optimize: detectByLidar
-- [ ] implement: detect from XRT roi or mask
+- [x] optimize: detectByLidar
+- [x] implement: detect from XRT roi or mask
 
 ## 2026-01-30
 

@@ -577,7 +577,7 @@ OreAnalyzer::extractOresFromImage(const cv::Mat &image, const ThicknessMap &map,
 }
 
 void OreAnalyzer::computeStats(Ore &ore, bool generate_map, float map_res,
-                                float area_per_point_mm2) {
+                               float area_per_point_mm2) {
   if (ore.point_indices->indices.empty())
     return;
 

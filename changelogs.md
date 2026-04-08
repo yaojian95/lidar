@@ -1,4 +1,14 @@
 
+## [2026-04-08]
+### 完善 by_mask 模式下中间结果生成全过程文档 (Enhanced Documentation for by_mask Mode Processing)
+- **文档增强**: 在 `code_explanation.md` 中新增第 7.4 节，详细解析了 `05-08` 图片的生成流水线。
+- **坐标映射说明**: 明确了点云物理坐标与图像像素坐标之间的映射关系、转置逻辑以及分步过滤/Rescale 的技术细节。
+- **明确各阶段导出逻辑**:
+  - `05_raw`: 原始转置物理底图。
+  - `06_rescaled`: 全采样 1:1 分辨率对齐图。
+  - `07_ores`: 视觉掩码过滤后的纯净矿石深度图。
+  - `08_fused`: 最终热力融合图。
+
 ## [2026-03-31]
 ### 高低能 XRT 几何畸变校正 (XRT High/Low Energy Distortion Correction)
 - **几何畸变补偿**: 针对高能和低能闪烁体探测器高度不同导致的扇形投影畸变，引入了 `xray_high_energy_correction_factor` 参数。
