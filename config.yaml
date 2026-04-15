@@ -2,9 +2,9 @@
   # pcd_path: "E:/multi_source_info/data_dir/20260309_banyan_detong_63/savedata_1_63_cropped.ply"
   # results_dir: "E:/multi_source_info/lidar/results_0309_high_test"
   pcd_path: "E:/multi_source_info/data_dir/20260325_yinshan/1_98_position_1_160kV_cropped.ply"
-  results_dir: "E:/multi_source_info/lidar/results_0325_yinshan"
+  results_dir: "E:/multi_source_info/lidar/results/results_0325_yinshan"
   unit_scale: 0.001000 # Conversion factor from point cloud units to physical meters.
-  dx_mm: 1.697          # Explicit point spacing in X (belt movement direction) in mm
+  dx_mm: 0.586 #0.586 for 1000fps; 1.697 for 300fps         # Explicit point spacing in X (belt movement direction) in mm
   dy_mm: 0.753          # Explicit point spacing in Y (across belt) in mm
   thickness_map_resolution: 0.002 # Target physical resolution of the generated 2D global thickness map in meters
   # Plane detection options
@@ -28,16 +28,16 @@
 
   # Ore Detection Setting
   # Options: "lidar" (Point cloud clustering), "mask" (RGB/XRT mask extraction), "roi" (RGB/XRT ROI extraction)
-  detection_mode: "mask"
-  # detection_mode: "lidar"
+  # detection_mode: "mask"
+  detection_mode: "lidar"
 
   # Ore Detection (Euclidean Clustering)
   cluster_tolerance: 20.0 # Distance between points to be considered part of the same object (in point cloud units)
-  min_cluster_size: 50    # Minimum number of points to form an ore chunk
+  min_cluster_size: 200    # Minimum number of points to form an ore chunk
   max_cluster_size: 50000 # Maximum number of points to form an ore chunk
 
   # Hybrid Clustering & Segmentation
-  cluster_strategy: 2 # 0: Euclidean Only, 1: Aspect Ratio, 2: Concavity/Density, 3: Multi-peaks
+  cluster_strategy: 2 # 2 work well; 0: Euclidean Only, 1: Aspect Ratio, 2: Concavity/Density, 3: Multi-peaks
   aspect_ratio_threshold: 2.5 # Aspect ratio > X triggers secondary Region Growing
   density_threshold: 0.3 # Bounding box occupancy density < X triggers secondary Region Growing
   rg_smoothness: 15.0 # Region Growing threshold in degrees (if normals change > X, split cluster)

@@ -7,7 +7,8 @@ import os
 
 # 加载点云文件
 # file_path = "E:/multi_source_info/lidar/pcd_data/position_1_cropped.ply"
-file_path = "E:/multi_source_info/lidar/pcd_data/20260309_banyan_detong_63/savedata_1_63_cropped.ply"
+# file_path = "E:/multi_source_info/lidar/pcd_data/20260309_banyan_detong_63/savedata_1_63_cropped.ply"
+file_path = "E:/multi_source_info/data_dir/20260325_yinshan/1_98_position_1_160kV_cropped.ply"
 if not os.path.exists(file_path):
     print(f"Error: {file_path} not found.")
 else:

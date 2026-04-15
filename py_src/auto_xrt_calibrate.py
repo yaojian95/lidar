@@ -152,8 +152,10 @@ def auto_calibrate_xrt(image_path, cut_left=0, cut_right=0, manual_factor=None, 
 
 if __name__ == "__main__":
     # Define input images from different paths
-    IMG1 = "E:/multi_source_info/lidar/pcd_data/20260309_banyan_detong_63/banyan_Detong_1_63_347.png"
-    IMG2 = "E:/multi_source_info/lidar/pcd_data/20260325_yinshan/20260325_yinshan/big_ores_position_2_160kV.tif"
+    # IMG1 = "E:/multi_source_info/lidar/pcd_data/20260309_banyan_detong_63/banyan_Detong_1_63_347.png"
+    # IMG2 = "E:/multi_source_info/lidar/pcd_data/20260325_yinshan/20260325_yinshan/big_ores_position_2_160kV.tif"
+    IMG1 = "E:/multi_source_info/data_dir/20260401/1_20_150kV.tif"
+    IMG2 = "E:/multi_source_info/data_dir/20260401/1_20_160kV.tif"
     
     # Set cuts (assuming same hardware setup)
     C_LEFT = 130
@@ -169,13 +171,13 @@ if __name__ == "__main__":
     # 1. Calibrate on the first image and save
     if os.path.exists(IMG1):
         factor = auto_calibrate_xrt(IMG1, cut_left=C_LEFT, cut_right=C_RIGHT, 
-                                   save_path=os.path.join(results_dir, "calibration_1_auto.png"),
+                                   save_path=os.path.join(results_dir, "yinshan_calibration_1_auto.png"),
                                    sample_row=ROW1)
         
         # 2. Apply same factor to the second image
         if factor and os.path.exists(IMG2):
             auto_calibrate_xrt(IMG2, cut_left=C_LEFT, cut_right=C_RIGHT, manual_factor=factor,
-                              save_path=os.path.join(results_dir, "calibration_2_applied.png"),
+                              save_path=os.path.join(results_dir, "yinshan_calibration_2_applied.png"),
                               sample_row=ROW2)
         else:
             if not factor: print("Calibration on IMG1 failed.")

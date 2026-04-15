@@ -13,8 +13,11 @@ REF_FILE = r"E:\multi_source_info\lidar\排水法测体积.xlsx"
 
 # Generated files to compare (list of CSV/XLSX files)
 GEN_FILES = [
-    r"E:\multi_source_info\lidar\results_0309_0p002_by_mask\banyan_Detong_1_63_347.csv",
-    r"E:\multi_source_info\lidar\results_0309_0p002_by_lidar\banyan_Detong_1_63_347.csv",
+    # r"E:\multi_source_info\lidar\results_0309_0p002_by_mask\banyan_Detong_1_63_347.csv",
+    # r"E:\multi_source_info\lidar\results_0309_0p002_by_lidar\banyan_Detong_1_63_347.csv",
+    # r"E:\multi_source_info\lidar\results\results_0325_yinshan_0p002_by_mask\1_98_position_1_160kV.csv"
+    r"E:\multi_source_info\lidar\results\results_0325_yinshan_0p002_by_lidar\1_98_position_1_160kV.csv"
+
     # Add more files here to compare together
 ]
 # ==========================================
@@ -38,7 +41,7 @@ def compare_volumes():
 
     # 2. Read Reference data
     try:
-        df_ref = pd.read_excel(REF_FILE)
+        df_ref = pd.read_excel(REF_FILE, sheet_name="0325")
         # Assuming last column is volume (ml) and first is ID
         ref_ids = df_ref.iloc[:, 0].values
         ref_vols = df_ref.iloc[:, -1].values
