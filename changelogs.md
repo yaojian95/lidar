@@ -1,4 +1,9 @@
 
+## [2026-04-15]
+### 自动化体积对比图保存 (Automated Volume Comparison Plot Saving)
+- **动态保存路径**: 更新了 `py_src/compare_volumes.py`，使对比图表 `volume_comparison.png` 能够根据 `GEN_FILES` 中指定的生成文件目录自动保存，而不再使用静态硬编码路径。
+- **可视化增强**: 重新启用了图表的自动保存功能，并确保在保存前应用 `plt.tight_layout()` 以优化布局。
+
 ## [2026-04-08]
 ### 完善 by_mask 模式下中间结果生成全过程文档 (Enhanced Documentation for by_mask Mode Processing)
 - **文档增强**: 在 `code_explanation.md` 中新增第 7.4 节，详细解析了 `05-08` 图片的生成流水线。
